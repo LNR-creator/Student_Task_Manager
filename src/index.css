@@ -1,0 +1,119 @@
+
+.add-task {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.add-task input,
+.add-task select {
+  padding: 12px;
+  border: 1px solid #ddd;
+  border-radius: 7px;
+  font-size: 14px;
+  background: white;
+  color: #333;
+}
+
+.add-task input[type="text"] {
+  flex: 2;
+  min-width: 180px;
+}
+
+.add-task select {
+  flex: 1;
+  min-width: 140px;
+}
+
+.add-task input[type="date"] {
+  flex: 1;
+  min-width: 145px;
+}
+
+.task-meta {
+  display: flex;
+  gap: 12px;
+  margin-top: 7px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+
+.category-label {
+  background: #e8efff;
+  color: #2563eb;
+  padding: 4px 9px;
+  border-radius: 20px;
+}
+
+.date-label {
+  color: #777;
+  padding: 4px;
+}
+
+@media (max-width: 600px) {
+  .add-task {
+    flex-direction: column;
+  }
+
+  .add-task input,
+  .add-task select {
+    width: 100%;
+  }
+}
+
+
+.filter-section {
+  display: flex;
+  gap: 12px;
+  margin-top: 25px;
+  margin-bottom: 15px;
+  flex-wrap: wrap;
+}
+
+.filter-section input,
+.filter-section select {
+  padding: 11px;
+  border: 1px solid #ddd;
+  border-radius: 7px;
+  background: white;
+  color: #333;
+  font-size: 14px;
+}
+
+.filter-section input {
+  flex: 2;
+  min-width: 180px;
+}
+
+.filter-section select {
+  flex: 1;
+  min-width: 140px;
+}
+
+@media (max-width: 600px) {
+  .filter-section {
+    flex-direction: column;
+  }
+
+  .filter-section input,
+  .filter-section select {
+    width: 100%;
+  }
+}
+
+
+.task-link {
+  color: #2563eb;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.task-link:hover {
+  text-decoration: underline;
+}
+
+.add-task input[type="url"] {
+  flex: 2;
+  min-width: 180px;
+}

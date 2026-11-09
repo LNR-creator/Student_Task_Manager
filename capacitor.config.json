@@ -1,0 +1,5 @@
+{
+  "appId": "com.student.taskmanager",
+  "appName": "Student Task Manager",
+  "webDir": "dist"
+}
