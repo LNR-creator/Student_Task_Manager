@@ -59,6 +59,9 @@ function App() {
   const [categoryInput, setCategoryInput] = useState('');
   const [category, setCategory] = useState('Study');
   const [dueDate, setDueDate] = useState('');
+  const [selectedTaskId, setSelectedTaskId] = useState(null);
+  const [selectedSubtaskIndex, setSelectedSubtaskIndex] = useState(null);
+  const [subtaskInput, setSubtaskInput] = useState('');
 
   // Save tasks to LocalStorage
   useEffect(() => {
@@ -133,7 +136,9 @@ function App() {
       link: taskLink.trim(),
       category: category,
       dueDate: dueDate,
-      completed: false
+      completed: false,
+      notes: '',
+      subtasks: []
     };
 
     setTasks((currentTasks) => [...currentTasks, newTask]);
@@ -158,12 +163,84 @@ function App() {
 
   // Delete task
   function handleDelete(id) {
+    const taskToDelete = tasks.find((task) => task.id === id);
+    if (!taskToDelete) return;
+
+    if (!window.confirm(`Do you really want to delete the task: ${taskToDelete.title}?`)) {
+      return;
+    }
 
     const updatedTasks = tasks.filter(
       (task) => task.id !== id
     );
 
     setTasks(updatedTasks);
+    if (selectedTaskId === id) {
+      setSelectedTaskId(null);
+      setSelectedSubtaskIndex(null);
+    }
+  }
+
+  function updateTask(id, update) {
+    setTasks((currentTasks) => currentTasks.map((task) => (
+      task.id === id ? { ...task, ...update } : task
+    )));
+  }
+
+  function handleAddSubtask(event) {
+    event.preventDefault();
+    const title = subtaskInput.trim();
+    if (!title || !selectedTask) return;
+
+    updateTask(selectedTask.id, {
+      subtasks: [
+        ...(selectedTask.subtasks || []),
+        { title, completed: false }
+      ]
+    });
+    setSubtaskInput('');
+  }
+
+  function handleToggleSubtask(subtaskIndex) {
+    if (!selectedTask) return;
+    updateTask(selectedTask.id, {
+      subtasks: (selectedTask.subtasks || []).map((subtask, index) => (
+        index === subtaskIndex
+          ? { ...subtask, completed: !subtask.completed }
+          : subtask
+      ))
+    });
+  }
+
+  function handleDeleteSubtask(subtaskIndex) {
+    if (!selectedTask) return;
+    const subtaskToDelete = selectedTask.subtasks?.[subtaskIndex];
+    if (!subtaskToDelete) return;
+
+    if (!window.confirm(
+      `Do you really want to delete subtask ${subtaskToDelete.title}\n\nMain Task : ${selectedTask.title}`
+    )) {
+      return;
+    }
+
+    updateTask(selectedTask.id, {
+      subtasks: (selectedTask.subtasks || []).filter(
+        (_, index) => index !== subtaskIndex
+      )
+    });
+    if (selectedSubtaskIndex === subtaskIndex) setSelectedSubtaskIndex(null);
+    else if (selectedSubtaskIndex > subtaskIndex) {
+      setSelectedSubtaskIndex(selectedSubtaskIndex - 1);
+    }
+  }
+
+  function handleUpdateSubtaskNote(subtaskIndex, notes) {
+    if (!selectedTask) return;
+    updateTask(selectedTask.id, {
+      subtasks: (selectedTask.subtasks || []).map((subtask, index) => (
+        index === subtaskIndex ? { ...subtask, notes } : subtask
+      ))
+    });
   }
 
   // Export tasks to JSON
@@ -246,7 +323,19 @@ function App() {
             category: task.category,
             dueDate: task.dueDate || '',
             link: task.link || '',
-            completed: task.completed
+            completed: task.completed,
+            notes: typeof task.notes === 'string' ? task.notes : '',
+            subtasks: Array.isArray(task.subtasks)
+              ? task.subtasks.filter((subtask) =>
+                subtask &&
+                typeof subtask.title === 'string' &&
+                typeof subtask.completed === 'boolean'
+              ).map((subtask) => ({
+                title: subtask.title,
+                completed: subtask.completed,
+                notes: typeof subtask.notes === 'string' ? subtask.notes : ''
+              }))
+              : []
           })));
 
           alert('Tasks imported successfully!');
@@ -279,6 +368,7 @@ function App() {
   ).length;
 
   const pendingTasks = totalTasks - completedTasks;
+  const selectedTask = tasks.find((task) => task.id === selectedTaskId);
 
   // Search and filter tasks
   let filteredTasks = tasks.filter((task) => {
@@ -311,6 +401,149 @@ function App() {
       return a.dueDate.localeCompare(b.dueDate);
     });
 
+  }
+
+  if (selectedTask) {
+    const subtasks = Array.isArray(selectedTask.subtasks) ? selectedTask.subtasks : [];
+    const selectedSubtask = selectedSubtaskIndex === null
+      ? null
+      : subtasks[selectedSubtaskIndex];
+
+    return (
+      <main className="app-container">
+        <section className="task-section task-detail">
+          {selectedSubtask ? (
+            <>
+              <button
+                type="button"
+                className="back-btn"
+                onClick={() => setSelectedSubtaskIndex(null)}
+              >
+                ← Back to {selectedTask.title}
+              </button>
+
+              <header className="task-detail-header">
+                <div>
+                  <p className="task-detail-eyebrow">Subtask notes</p>
+                  <h1>{selectedSubtask.title}</h1>
+                  <p className="subtask-parent-label">Main Task: {selectedTask.title}</p>
+                </div>
+                <span className={selectedSubtask.completed ? 'detail-status completed' : 'detail-status'}>
+                  {selectedSubtask.completed ? 'Completed' : 'In progress'}
+                </span>
+              </header>
+
+              <label className="detail-label" htmlFor="subtask-notes">Notes</label>
+              <textarea
+                id="subtask-notes"
+                className="task-notes"
+                placeholder="Write your notes about this subtask..."
+                value={selectedSubtask.notes || ''}
+                onChange={(event) => handleUpdateSubtaskNote(selectedSubtaskIndex, event.target.value)}
+              />
+            </>
+          ) : (
+            <>
+          <button
+            type="button"
+            className="back-btn"
+            onClick={() => {
+              setSelectedTaskId(null);
+              setSelectedSubtaskIndex(null);
+              setSubtaskInput('');
+            }}
+          >
+            ← Back to tasks
+          </button>
+
+          <header className="task-detail-header">
+            <div>
+              <p className="task-detail-eyebrow">Task notes</p>
+              <h1>{selectedTask.title}</h1>
+              <div className="task-meta">
+                <span className="category-label">{selectedTask.category}</span>
+                {selectedTask.dueDate && (
+                  <span className="date-label">Due: {selectedTask.dueDate}</span>
+                )}
+              </div>
+            </div>
+            <span className={selectedTask.completed ? 'detail-status completed' : 'detail-status'}>
+              {selectedTask.completed ? 'Completed' : 'In progress'}
+            </span>
+          </header>
+
+          <label className="detail-label" htmlFor="task-notes">Notes</label>
+          <textarea
+            id="task-notes"
+            className="task-notes"
+            placeholder="Write your notes about this task..."
+            value={selectedTask.notes || ''}
+            onChange={(event) => updateTask(selectedTask.id, { notes: event.target.value })}
+          />
+
+          <section className="subtasks-section" aria-labelledby="subtasks-title">
+            <div className="subtasks-heading">
+              <div>
+                <h2 id="subtasks-title">Subtasks</h2>
+                <p>Break this task into smaller steps.</p>
+              </div>
+              <span className="subtask-count">{subtasks.filter((item) => item.completed).length}/{subtasks.length}</span>
+            </div>
+
+            <form className="subtask-form" onSubmit={handleAddSubtask}>
+              <input
+                type="text"
+                aria-label="New subtask"
+                placeholder="Add a subtask..."
+                value={subtaskInput}
+                onChange={(event) => setSubtaskInput(event.target.value)}
+              />
+              <button type="submit" className="category-add-btn">Add subtask</button>
+            </form>
+
+            {subtasks.length > 0 ? (
+              <ul className="subtask-list">
+                {subtasks.map((subtask, index) => (
+                  <li className="subtask-item" key={`${index}-${subtask.title}`}>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={subtask.completed}
+                        onChange={() => handleToggleSubtask(index)}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      className={`subtask-title-btn${subtask.completed ? ' subtask-completed' : ''}`}
+                      onClick={() => setSelectedSubtaskIndex(index)}
+                    >
+                      <span>
+                        {subtask.title}
+                      </span>
+                      <span className="subtask-note-indicator">
+                        {subtask.notes ? 'View / edit note' : 'Add note'}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="subtask-delete-btn"
+                      onClick={() => handleDeleteSubtask(index)}
+                      aria-label={`Delete subtask ${subtask.title}`}
+                    >
+                      ×
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="subtasks-empty">No subtasks yet.</p>
+            )}
+          </section>
+            </>
+          )}
+        </section>
+      </main>
+    );
   }
 
   return (
@@ -531,11 +764,13 @@ function App() {
 
                   <div>
 
-                    <span className={
-                      task.completed ? 'completed' : ''
-                    }>
+                    <button
+                      type="button"
+                      className={`task-title-btn${task.completed ? ' completed' : ''}`}
+                      onClick={() => setSelectedTaskId(task.id)}
+                    >
                       {task.title}
-                    </span>
+                    </button>
 
 
                     <div className="task-meta">
