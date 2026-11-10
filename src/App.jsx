@@ -2,6 +2,18 @@
 import { useState, useEffect } from 'react';
 import './App.css';
 
+const DEFAULT_CATEGORIES = [
+  'Study',
+  'Assignment',
+  'Machine Learning',
+  'AI',
+  'Arduino',
+  'GATE',
+  'Coding',
+  'Exam',
+  'Personal'
+];
+
 function App() {
 
   // Search and filter states
@@ -18,6 +30,33 @@ function App() {
   });
 
   const [taskInput, setTaskInput] = useState('');
+  const [categories, setCategories] = useState(() => {
+    const savedCategories = localStorage.getItem('studentTaskCategories');
+    let storedCategories = [];
+
+    if (savedCategories) {
+      try {
+        const parsedCategories = JSON.parse(savedCategories);
+        if (Array.isArray(parsedCategories)) {
+          storedCategories = parsedCategories.filter(
+            (item) => typeof item === 'string' && item.trim()
+          );
+        }
+      } catch {
+        storedCategories = [];
+      }
+    }
+
+    const savedTasks = JSON.parse(localStorage.getItem('studentTasks') || '[]');
+    const taskCategories = Array.isArray(savedTasks)
+      ? savedTasks.map((task) => task?.category).filter(
+        (item) => typeof item === 'string' && item.trim()
+      )
+      : [];
+
+    return [...new Set([...DEFAULT_CATEGORIES, ...storedCategories, ...taskCategories])];
+  });
+  const [categoryInput, setCategoryInput] = useState('');
   const [category, setCategory] = useState('Study');
   const [dueDate, setDueDate] = useState('');
 
@@ -29,11 +68,62 @@ function App() {
     );
   }, [tasks]);
 
+  useEffect(() => {
+    localStorage.setItem('studentTaskCategories', JSON.stringify(categories));
+  }, [categories]);
+
+  function handleAddCategory(event) {
+    event.preventDefault();
+    const newCategory = categoryInput.trim();
+
+    if (!newCategory) return;
+
+    if (categories.some((item) => item.toLowerCase() === newCategory.toLowerCase())) {
+      alert('That category already exists.');
+      return;
+    }
+
+    setCategories((currentCategories) => [...currentCategories, newCategory]);
+    setCategory(newCategory);
+    setCategoryInput('');
+  }
+
+  function handleDeleteCategory(categoryToDelete) {
+    if (categories.length <= 1) {
+      alert('At least one category must remain.');
+      return;
+    }
+
+    if (!window.confirm(`Do you really want to delete ${categoryToDelete}`)) {
+      return;
+    }
+
+    const remainingCategories = categories.filter(
+      (item) => item !== categoryToDelete
+    );
+    const fallbackCategory = remainingCategories[0];
+
+    setCategories(remainingCategories);
+    setTasks((currentTasks) => currentTasks.map((task) => (
+      task.category === categoryToDelete
+        ? { ...task, category: fallbackCategory }
+        : task
+    )));
+
+    if (category === categoryToDelete) setCategory(fallbackCategory);
+    if (categoryFilter === categoryToDelete) setCategoryFilter('All');
+  }
+
   // Add task
   function handleAddTask() {
 
     if (taskInput.trim() === '') {
       alert('Please enter a task!');
+      return;
+    }
+
+    if (!category) {
+      alert('Please add a category before creating a task.');
       return;
     }
 
@@ -46,7 +136,7 @@ function App() {
       completed: false
     };
 
-    setTasks([...tasks, newTask]);
+    setTasks((currentTasks) => [...currentTasks, newTask]);
 
     setTaskInput('');
     setCategory('Study');
@@ -143,6 +233,13 @@ function App() {
 
         if (confirmImport) {
 
+          setCategories((currentCategories) => [
+            ...new Set([
+              ...currentCategories,
+              ...importedTasks.map((task) => task.category.trim()).filter(Boolean)
+            ])
+          ]);
+
           setTasks(importedTasks.map((task) => ({
             id: task.id,
             title: task.title.trim(),
@@ -156,7 +253,7 @@ function App() {
 
         }
 
-      } catch (error) {
+      } catch {
 
         alert('Invalid JSON file. Please select a valid task backup.');
 
@@ -308,15 +405,9 @@ function App() {
             value={category}
             onChange={(e) => setCategory(e.target.value)}
           >
-            <option value="Study">📚 Study</option>
-            <option value="Assignment">📝 Assignment</option>
-            <option value="Machine Learning">Machine Learning</option>
-            <option value="AI">AI</option>
-            <option value="Arduino">Arduino</option>
-            <option value="GATE">GATE</option>
-            <option value="Coding">💻 Coding</option>
-            <option value="Exam">🎯 Exam</option>
-            <option value="Personal">👤 Personal</option>
+            {categories.map((item) => (
+              <option value={item} key={item}>{item}</option>
+            ))}
           </select>
 
           <input
@@ -330,6 +421,45 @@ function App() {
           </button>
 
         </div>
+
+        <section className="category-manager" aria-labelledby="category-manager-title">
+          <div className="category-manager-heading">
+            <div>
+              <h3 id="category-manager-title">Manage categories</h3>
+              <p>Add your own categories or remove ones you no longer need.</p>
+            </div>
+          </div>
+
+          <form className="category-form" onSubmit={handleAddCategory}>
+            <input
+              type="text"
+              placeholder="New category name"
+              aria-label="New category name"
+              maxLength={40}
+              value={categoryInput}
+              onChange={(event) => setCategoryInput(event.target.value)}
+            />
+            <button type="submit" className="category-add-btn">Add category</button>
+          </form>
+
+          <ul className="category-list" aria-label="Categories">
+            {categories.map((item) => (
+              <li className="category-chip" key={item}>
+                <span>{item}</span>
+                <button
+                  type="button"
+                  className="category-remove-btn"
+                  onClick={() => handleDeleteCategory(item)}
+                  disabled={categories.length <= 1}
+                  aria-label={`Delete ${item} category`}
+                  title={categories.length <= 1 ? 'At least one category must remain' : `Delete ${item}`}
+                >
+                  <span aria-hidden="true">&times;</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
 
         {/* Search and Filters */}
         <div className="filter-section">
@@ -355,15 +485,9 @@ function App() {
             onChange={(e) => setCategoryFilter(e.target.value)}
           >
             <option value="All">All Categories</option>
-            <option value="Study">Study</option>
-            <option value="Assignment">Assignment</option>
-            <option value="Machine Learning">Machine Learning</option>
-            <option value="AI">AI</option>
-            <option value="Arduino">Arduino</option>
-            <option value="GATE">GATE</option>
-            <option value="Coding">Coding</option>
-            <option value="Exam">Exam</option>
-            <option value="Personal">Personal</option>
+            {categories.map((item) => (
+              <option value={item} key={item}>{item}</option>
+            ))}
           </select>
 
           <select
