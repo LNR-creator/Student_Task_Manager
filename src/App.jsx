@@ -2,7 +2,17 @@
 import { useState, useEffect } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
-import { setupNotificationChannel, scheduleTestNotification } from './services/notificationService';
+import {
+  setupNotificationChannel,
+  scheduleTestNotification,
+  requestPermissions,
+  checkPermissions,
+  cancelTaskNotifications,
+  syncAllTaskNotifications,
+  isTaskOverdue,
+  getNotificationSettings,
+  saveNotificationSettings
+} from './services/notificationService';
 import './App.css';
 
 const DEFAULT_REMINDER_TIME = '09:00';
@@ -29,41 +39,6 @@ function getReferenceUrl(value) {
   } catch {
     return null;
   }
-}
-
-function getReminderId(taskId, reminderType) {
-  const value = `${taskId}-${reminderType}`;
-  let hash = 0;
-  for (const character of value) {
-    hash = (hash * 31 + character.charCodeAt(0)) | 0;
-  }
-  return Math.abs(hash % 2147483647) || 1;
-}
-
-function getTaskReminders(tasks) {
-  const now = Date.now();
-  return tasks.flatMap((task) => {
-    if (task.completed) return [];
-
-    return [
-      task.startDate && {
-        id: getReminderId(task.id, 'start'),
-        title: 'Task starts today',
-        body: task.title,
-        schedule: { at: getTaskDateTime(task.startDate, task.startTime) }
-      },
-      task.dueDate && {
-        id: getReminderId(task.id, 'deadline'),
-        title: 'Task deadline today',
-        body: task.title,
-        schedule: { at: getTaskDateTime(task.dueDate, task.endTime) }
-      }
-    ].filter((reminder) => (
-      reminder && reminder.schedule.at instanceof Date &&
-      !Number.isNaN(reminder.schedule.at.getTime()) &&
-      reminder.schedule.at.getTime() > now
-    ));
-  });
 }
 
 const DEFAULT_CATEGORIES = [
@@ -140,6 +115,7 @@ function App() {
   });
   const [notificationStatus, setNotificationStatus] = useState('');
   const [reminderSyncVersion, setReminderSyncVersion] = useState(0);
+  const [showSettings, setShowSettings] = useState(false);
 
   // Save tasks to LocalStorage
   useEffect(() => {
@@ -157,160 +133,66 @@ function App() {
     setupNotificationChannel();
   }, []);
 
-  const reminderTaskData = JSON.stringify(tasks.map((task) => ({
-    id: task.id,
-    title: task.title,
-    startDate: task.startDate || '',
-    startTime: task.startTime || DEFAULT_REMINDER_TIME,
-    dueDate: task.dueDate || '',
-    endTime: task.endTime || DEFAULT_REMINDER_TIME,
-    completed: task.completed
-  })));
+  const [notificationSettings, setNotificationSettings] = useState(getNotificationSettings);
+
+  useEffect(() => {
+    saveNotificationSettings(notificationSettings);
+  }, [notificationSettings]);
 
   useEffect(() => {
     let cancelled = false;
-    const timeoutIds = [];
 
-    async function synchronizeReminders() {
+    async function syncReminders() {
       try {
-        const notifications = getTaskReminders(JSON.parse(reminderTaskData));
-        if (notifications.length === 0) {
+        if (!notificationSettings.enabled) {
           if (Capacitor.isNativePlatform()) {
             const scheduledIds = JSON.parse(
               localStorage.getItem('studentTaskReminderIds') || '[]'
             );
-            if (!Array.isArray(scheduledIds)) {
-              throw new Error('Saved reminder IDs are invalid.');
-            }
-            if (scheduledIds.length > 0) {
+            if (Array.isArray(scheduledIds) && scheduledIds.length > 0) {
               await LocalNotifications.cancel({
                 notifications: scheduledIds.map((id) => ({ id }))
               });
             }
             localStorage.removeItem('studentTaskReminderIds');
           }
-          if (!cancelled) setNotificationStatus('');
+          if (!cancelled) setNotificationStatus('Notifications are currently turned off in settings.');
           return;
         }
 
-        if (!Capacitor.isNativePlatform()) {
-          if (!('Notification' in window)) {
-            if (!cancelled) {
-              setNotificationStatus('This browser does not support notifications.');
-            }
-            return;
-          }
-          if (Notification.permission !== 'granted') {
-            if (!cancelled) {
-              setNotificationStatus('Enable browser notifications to receive task reminders.');
-            }
-            return;
-          }
-
-          notifications.forEach((notification) => {
-            const notifyWhenDue = () => {
-              if (cancelled) return;
-              const remaining = notification.schedule.at.getTime() - Date.now();
-              if (remaining > 0) {
-                timeoutIds.push(setTimeout(
-                  notifyWhenDue,
-                  Math.min(remaining, 2147483647)
-                ));
-                return;
-              }
-              new Notification(notification.title, { body: notification.body });
-            };
-            notifyWhenDue();
-          });
-          if (!cancelled) {
-            setNotificationStatus(
-              'Web reminders use the selected local times while this page is open. Browser or OS background limits may delay delivery.'
-            );
-          }
-          return;
-        }
-
-        const scheduledIds = JSON.parse(
-          localStorage.getItem('studentTaskReminderIds') || '[]'
-        );
-        if (!Array.isArray(scheduledIds)) {
-          throw new Error('Saved reminder IDs are invalid.');
-        }
-        if (scheduledIds.length > 0) {
-          await LocalNotifications.cancel({
-            notifications: scheduledIds.map((id) => ({ id }))
-          });
-        }
-
-        const permission = await LocalNotifications.checkPermissions();
-        if (permission.display !== 'granted') {
-          localStorage.removeItem('studentTaskReminderIds');
-          if (!cancelled) {
-            setNotificationStatus('Enable mobile notifications to receive your task reminders.');
-          }
-          return;
-        }
-
-        await LocalNotifications.schedule({ notifications });
+        const scheduled = await syncAllTaskNotifications(tasks, notificationSettings);
         if (cancelled) return;
-        localStorage.setItem(
-          'studentTaskReminderIds',
-          JSON.stringify(notifications.map(({ id }) => id))
-        );
-        setNotificationStatus(
-          'Mobile reminders are scheduled for the selected local start and end times.'
-        );
-      } catch (error) {
-        console.error('Unable to synchronize task reminders:', error);
-        if (!cancelled) {
-          setNotificationStatus(
-            `Unable to schedule task reminders: ${error instanceof Error ? error.message : 'Unknown error'}`
-          );
+
+        if (scheduled.length > 0) {
+          setNotificationStatus(`🔔 Active deadline reminders: ${scheduled.length} scheduled across your tasks.`);
+        } else {
+          setNotificationStatus('');
         }
+      } catch (err) {
+        console.error('Failed to sync reminders:', err);
       }
     }
 
-    synchronizeReminders();
+    syncReminders();
     return () => {
       cancelled = true;
-      timeoutIds.forEach(clearTimeout);
     };
-  }, [reminderTaskData, reminderSyncVersion]);
+  }, [tasks, notificationSettings, reminderSyncVersion]);
 
   async function requestNotificationPermission() {
     try {
-      if (!Capacitor.isNativePlatform()) {
-        if (!('Notification' in window)) {
-          setNotificationStatus('This browser does not support notifications.');
-          return false;
-        }
-        const permission = await Notification.requestPermission();
-        if (permission === 'granted') {
-          setReminderSyncVersion((version) => version + 1);
-          return true;
-        }
-        setNotificationStatus('Browser notifications are disabled. The task was saved without reminders.');
-        return false;
-      }
-
-      const currentPermission = await LocalNotifications.checkPermissions();
-      if (currentPermission.display === 'granted') {
+      const granted = await requestPermissions();
+      if (granted) {
         setReminderSyncVersion((version) => version + 1);
+        setNotificationStatus('✅ Notifications enabled! Reminders will trigger automatically.');
         return true;
       }
-
-      const permission = await LocalNotifications.requestPermissions();
-      if (permission.display === 'granted') {
-        setReminderSyncVersion((version) => version + 1);
-        return true;
-      }
-
-      setNotificationStatus('Notifications are disabled. The task was saved without reminders.');
+      setNotificationStatus('⚠️ Notifications are disabled. You can enable them in device settings.');
       return false;
     } catch (error) {
       console.error('Unable to request notification permission:', error);
       setNotificationStatus(
-        `Notifications are unavailable: ${error instanceof Error ? error.message : 'Unknown error'}`
+        `Notifications error: ${error instanceof Error ? error.message : 'Unknown error'}`
       );
       return false;
     }
@@ -395,14 +277,7 @@ function App() {
       return;
     }
 
-    if (getTaskReminders([{
-      id: Date.now(),
-      title: taskInput.trim(),
-      startDate,
-      startTime,
-      dueDate,
-      endTime
-    }]).length > 0) {
+    if (dueDate) {
       await requestNotificationPermission();
     }
 
@@ -434,25 +309,31 @@ function App() {
   }
 
   // Complete task
-  function handleComplete(id) {
-
+  async function handleComplete(id) {
     const updatedTasks = tasks.map((task) =>
       task.id === id
         ? { ...task, completed: !task.completed }
         : task
     );
 
+    const target = updatedTasks.find((t) => t.id === id);
+    if (target?.completed) {
+      await cancelTaskNotifications(id);
+    }
+
     setTasks(updatedTasks);
   }
 
   // Delete task
-  function handleDelete(id) {
+  async function handleDelete(id) {
     const taskToDelete = tasks.find((task) => task.id === id);
     if (!taskToDelete) return;
 
     if (!window.confirm(`Do you really want to delete the task: ${taskToDelete.title}?`)) {
       return;
     }
+
+    await cancelTaskNotifications(id);
 
     const updatedTasks = tasks.filter(
       (task) => task.id !== id
@@ -488,15 +369,11 @@ function App() {
       return;
     }
 
-    if (getTaskReminders([{
-      ...selectedTask,
-      startDate: nextStartDate,
-      startTime: nextStartTime,
-      dueDate: nextDueDate,
-      endTime: nextEndTime
-    }]).length > 0) {
+    if (nextDueDate) {
       await requestNotificationPermission();
     }
+
+    await cancelTaskNotifications(selectedTask.id);
 
     updateTask(selectedTask.id, {
       startDate: nextStartDate,
@@ -602,25 +479,44 @@ function App() {
     setSubtaskReferenceDraft(link);
   }
 
-  // Export tasks to JSON
-  function handleExportJSON() {
+  // Export tasks to JSON (Fully compatible with Android & Web)
+  async function handleExportJSON() {
+    try {
+      const jsonData = JSON.stringify(tasks, null, 2);
+      const filename = `student-tasks-backup-${new Date().toISOString().slice(0, 10)}.json`;
 
-    const jsonData = JSON.stringify(tasks, null, 2);
+      // On Android / mobile WebView, use Web Share API to open system save/share dialog
+      if (typeof navigator !== 'undefined' && navigator.share) {
+        try {
+          const file = new File([jsonData], filename, { type: 'application/json' });
+          if (navigator.canShare && navigator.canShare({ files: [file] })) {
+            await navigator.share({
+              title: 'Student Tasks Backup',
+              text: 'Backup file for Student Task Manager',
+              files: [file]
+            });
+            return;
+          }
+        } catch (shareErr) {
+          if (shareErr.name === 'AbortError') return; // User cancelled
+          console.warn('File share failed, attempting text share or blob fallback:', shareErr);
+        }
+      }
 
-    const blob = new Blob([jsonData], {
-      type: 'application/json'
-    });
-
-    const url = URL.createObjectURL(blob);
-
-    const link = document.createElement('a');
-
-    link.href = url;
-    link.download = 'student-tasks-backup.json';
-
-    link.click();
-
-    URL.revokeObjectURL(url);
+      // Desktop browser fallback
+      const blob = new Blob([jsonData], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Export JSON error:', err);
+      alert('Unable to export tasks. Please try again.');
+    }
   }
 
   // Import tasks from JSON
@@ -861,9 +757,12 @@ function App() {
                   </span>
                 )}
                 {selectedTask.dueDate && (
-                  <span className="date-label">
-                    Deadline: {selectedTask.dueDate} at {selectedTask.endTime || DEFAULT_REMINDER_TIME}
+                  <span className={isTaskOverdue(selectedTask) ? 'date-label overdue' : 'date-label'}>
+                    Deadline: {selectedTask.dueDate} at {selectedTask.dueTime || selectedTask.endTime || DEFAULT_REMINDER_TIME}
                   </span>
+                )}
+                {isTaskOverdue(selectedTask) && (
+                  <span className="overdue-tag">🚨 Overdue</span>
                 )}
               </div>
             </div>
@@ -1084,7 +983,126 @@ function App() {
         >
           ⚡ Test 10s Notification
         </button>
+        <button
+          type="button"
+          className="notification-settings-btn"
+          onClick={() => setShowSettings(!showSettings)}
+        >
+          ⚙️ Notification Settings
+        </button>
       </div>
+
+      {/* Notification Settings Panel */}
+      {showSettings && (
+        <section className="settings-panel" aria-labelledby="settings-heading">
+          <div className="settings-header">
+            <h3 id="settings-heading">⚙️ Notification Preferences</h3>
+            <button
+              type="button"
+              className="settings-close-btn"
+              onClick={() => setShowSettings(false)}
+              aria-label="Close settings"
+            >
+              ✕
+            </button>
+          </div>
+
+          <div className="settings-grid">
+            <label className="setting-toggle">
+              <input
+                type="checkbox"
+                checked={notificationSettings.enabled}
+                onChange={(e) => setNotificationSettings((s) => ({ ...s, enabled: e.target.checked }))}
+              />
+              <span><strong>Enable All Notifications</strong></span>
+            </label>
+
+            <label className="setting-toggle">
+              <input
+                type="checkbox"
+                disabled={!notificationSettings.enabled}
+                checked={notificationSettings.reminder1Day}
+                onChange={(e) => setNotificationSettings((s) => ({ ...s, reminder1Day: e.target.checked }))}
+              />
+              <span>📚 1 Day Before Deadline</span>
+            </label>
+
+            <label className="setting-toggle">
+              <input
+                type="checkbox"
+                disabled={!notificationSettings.enabled}
+                checked={notificationSettings.reminder1Hour}
+                onChange={(e) => setNotificationSettings((s) => ({ ...s, reminder1Hour: e.target.checked }))}
+              />
+              <span>⏰ 1 Hour Before Deadline</span>
+            </label>
+
+            <label className="setting-toggle">
+              <input
+                type="checkbox"
+                disabled={!notificationSettings.enabled}
+                checked={notificationSettings.reminder15Min}
+                onChange={(e) => setNotificationSettings((s) => ({ ...s, reminder15Min: e.target.checked }))}
+              />
+              <span>🚨 15 Minutes Before Deadline</span>
+            </label>
+
+            <label className="setting-toggle">
+              <input
+                type="checkbox"
+                disabled={!notificationSettings.enabled}
+                checked={notificationSettings.reminderAtDeadline}
+                onChange={(e) => setNotificationSettings((s) => ({ ...s, reminderAtDeadline: e.target.checked }))}
+              />
+              <span>⌛ Exact Deadline Alert</span>
+            </label>
+
+            <label className="setting-toggle">
+              <input
+                type="checkbox"
+                disabled={!notificationSettings.enabled}
+                checked={notificationSettings.overdueAlerts}
+                onChange={(e) => setNotificationSettings((s) => ({ ...s, overdueAlerts: e.target.checked }))}
+              />
+              <span>⚠️ Overdue Alerts &amp; Badges</span>
+            </label>
+
+            <div className="setting-group">
+              <label className="setting-toggle">
+                <input
+                  type="checkbox"
+                  disabled={!notificationSettings.enabled}
+                  checked={notificationSettings.dailySummary}
+                  onChange={(e) => setNotificationSettings((s) => ({ ...s, dailySummary: e.target.checked }))}
+                />
+                <span>🌅 Daily Morning Summary</span>
+              </label>
+
+              {notificationSettings.dailySummary && (
+                <div className="setting-subinput">
+                  <label htmlFor="daily-time-input">Delivery Time:</label>
+                  <input
+                    id="daily-time-input"
+                    type="time"
+                    value={notificationSettings.dailySummaryTime || '08:00'}
+                    onChange={(e) => setNotificationSettings((s) => ({ ...s, dailySummaryTime: e.target.value }))}
+                  />
+                </div>
+              )}
+            </div>
+
+            <label className="setting-toggle">
+              <input
+                type="checkbox"
+                disabled={!notificationSettings.enabled}
+                checked={notificationSettings.vibration}
+                onChange={(e) => setNotificationSettings((s) => ({ ...s, vibration: e.target.checked }))}
+              />
+              <span>📳 Vibration Alerts</span>
+            </label>
+          </div>
+        </section>
+      )}
 
       {/* Dashboard */}
       <section className="dashboard">
@@ -1363,9 +1381,13 @@ function App() {
                       )}
 
                       {task.dueDate && (
-                        <span className="date-label">
-                          Deadline: {task.dueDate} at {task.endTime || DEFAULT_REMINDER_TIME}
+                        <span className={isTaskOverdue(task) ? 'date-label overdue' : 'date-label'}>
+                          Deadline: {task.dueDate} at {task.dueTime || task.endTime || DEFAULT_REMINDER_TIME}
                         </span>
+                      )}
+
+                      {isTaskOverdue(task) && (
+                        <span className="overdue-tag">🚨 Overdue</span>
                       )}
 
                       {getReferenceUrl(task.link || '') && (
