@@ -14,6 +14,7 @@ import {
   saveNotificationSettings
 } from './services/notificationService';
 import { LinkBadge } from './components/LinkBadge';
+import { RichNotesEditor } from './components/RichNotesEditor';
 import './App.css';
 
 const DEFAULT_REMINDER_TIME = '09:00';
@@ -1053,12 +1054,11 @@ function App() {
               })()}
 
               <label className="detail-label" htmlFor="subtask-notes">Notes</label>
-              <textarea
+              <RichNotesEditor
                 id="subtask-notes"
-                className="task-notes"
-                placeholder="Write your notes about this subtask..."
                 value={currentSubtask.notes || ''}
-                onChange={(event) => handleUpdateSubtaskNote(currentSubtask.id, event.target.value)}
+                onChange={(newNotes) => handleUpdateSubtaskNote(currentSubtask.id, newNotes)}
+                placeholder="Write subtask notes with bold, headings, bullet points, checklists..."
               />
             </>
           ) : (
@@ -1186,12 +1186,11 @@ function App() {
               })()}
 
               <label className="detail-label" htmlFor="task-notes">Notes</label>
-              <textarea
+              <RichNotesEditor
                 id="task-notes"
-                className="task-notes"
-                placeholder="Write your notes about this task..."
                 value={selectedTask.notes || ''}
-                onChange={(event) => updateTask(selectedTask.id, { notes: event.target.value })}
+                onChange={(newNotes) => updateTask(selectedTask.id, { notes: newNotes })}
+                placeholder="Write task notes with bold, headings, bullet points, checklists..."
               />
             </>
           )}
@@ -1321,15 +1320,6 @@ function App() {
           </div>
 
           <div className="header-actions">
-            <button
-              type="button"
-              className="theme-toggle-btn"
-              onClick={toggleTheme}
-              aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-              title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-            >
-              {theme === 'dark' ? '☀️ Light' : '🌙 Dark'}
-            </button>
             <div className="header-icon">
               🎯
             </div>
@@ -1344,21 +1334,30 @@ function App() {
           className="notification-button"
           onClick={requestNotificationPermission}
         >
-          🔔 Enable notifications
+          🔔
         </button>
         <button
           type="button"
           className="notification-test-btn"
           onClick={handleTestNotification}
         >
-          ⚡ Test 10s Notification
+          ⚡ Test
         </button>
         <button
           type="button"
           className="notification-settings-btn"
           onClick={() => setShowSettings(!showSettings)}
         >
-          ⚙️ Notification Settings
+          ⚙️
+        </button>
+        <button
+          type="button"
+          className="theme-toggle-btn"
+          onClick={toggleTheme}
+          aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+        >
+          {theme === 'dark' ? '☀️ Light' : '🌙 Dark'}
         </button>
       </div>
 
