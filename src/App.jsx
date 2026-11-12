@@ -226,6 +226,27 @@ function App() {
   const [notificationStatus, setNotificationStatus] = useState('');
   const [reminderSyncVersion, setReminderSyncVersion] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
+  const [theme, setTheme] = useState(() => {
+    const saved = localStorage.getItem('studentTaskTheme');
+    if (saved === 'dark' || saved === 'light') return saved;
+    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+      ? 'dark'
+      : 'light';
+  });
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    if (theme === 'dark') {
+      document.body.classList.add('dark-theme');
+    } else {
+      document.body.classList.remove('dark-theme');
+    }
+    localStorage.setItem('studentTaskTheme', theme);
+  }, [theme]);
+
+  function toggleTheme() {
+    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
+  }
 
   // Save tasks to LocalStorage
   useEffect(() => {
@@ -875,13 +896,24 @@ function App() {
                   <p className="task-detail-eyebrow">Subtask (Level {subtaskPath.length})</p>
                   <h1>{currentSubtask.title}</h1>
                 </div>
-                <button
-                  type="button"
-                  className={currentSubtask.completed ? 'detail-status-btn completed' : 'detail-status-btn'}
-                  onClick={() => handleToggleSubtask(currentSubtask.id)}
-                >
-                  {currentSubtask.completed ? '✓ Completed' : '○ In progress'}
-                </button>
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                  <button
+                    type="button"
+                    className="theme-toggle-btn"
+                    onClick={toggleTheme}
+                    aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+                    title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+                  >
+                    {theme === 'dark' ? '☀️' : '🌙'}
+                  </button>
+                  <button
+                    type="button"
+                    className={currentSubtask.completed ? 'detail-status-btn completed' : 'detail-status-btn'}
+                    onClick={() => handleToggleSubtask(currentSubtask.id)}
+                  >
+                    {currentSubtask.completed ? '✓ Completed' : '○ In progress'}
+                  </button>
+                </div>
               </header>
 
               <form className="reference-form" onSubmit={handleSaveSubtaskReference}>
@@ -940,9 +972,20 @@ function App() {
                     )}
                   </div>
                 </div>
-                <span className={selectedTask.completed ? 'detail-status completed' : 'detail-status'}>
-                  {selectedTask.completed ? 'Completed' : 'In progress'}
-                </span>
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                  <button
+                    type="button"
+                    className="theme-toggle-btn"
+                    onClick={toggleTheme}
+                    aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+                    title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+                  >
+                    {theme === 'dark' ? '☀️' : '🌙'}
+                  </button>
+                  <span className={selectedTask.completed ? 'detail-status completed' : 'detail-status'}>
+                    {selectedTask.completed ? 'Completed' : 'In progress'}
+                  </span>
+                </div>
               </header>
 
               {notificationStatus && (
@@ -1158,8 +1201,19 @@ function App() {
             )}
           </div>
 
-          <div className="header-icon">
-            🎯
+          <div className="header-actions">
+            <button
+              type="button"
+              className="theme-toggle-btn"
+              onClick={toggleTheme}
+              aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+              title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            >
+              {theme === 'dark' ? '☀️ Light' : '🌙 Dark'}
+            </button>
+            <div className="header-icon">
+              🎯
+            </div>
           </div>
         </div>
       </header>
