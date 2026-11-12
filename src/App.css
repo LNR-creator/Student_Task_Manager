@@ -872,6 +872,33 @@ body.dark-theme .category-remove-btn:hover:not(:disabled) {
   background: #991b1b !important;
 }
 
+/* Category Label Base Badges */
+.category-label {
+  display: inline-block;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  background: #e0e7ff;
+  color: #3730a3;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+.task-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 13px;
+  color: #64748b;
+}
+
+body.dark-theme .task-meta {
+  color: #94a3b8;
+}
+
 /* Category Label Badges (High Contrast in Dark Mode) */
 body.dark-theme .category-label {
   background: #1e3a8a !important;
@@ -952,6 +979,205 @@ body.dark-theme .notification-status {
 body.dark-theme .detail-label {
   color: #e2e8f0;
 }
+
+/* ============================================================
+   PLATFORM REFERENCE LINK BADGES & ICONS
+   ============================================================ */
+.link-input-group {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+}
+
+.link-input-group input {
+  flex: 1;
+  min-width: 0;
+}
+
+.link-add-inline-btn {
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid #c7d2fe;
+  background: #eef2ff;
+  color: #4338ca;
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+.link-add-inline-btn:hover {
+  background: #e0e7ff;
+}
+
+body.dark-theme .link-add-inline-btn {
+  background: #1e1b4b;
+  color: #a5b4fc;
+  border-color: #3730a3;
+}
+
+body.dark-theme .link-add-inline-btn:hover {
+  background: #312e81;
+}
+
+.link-badge-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 6px 0;
+}
+
+.link-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+  border: 1px solid transparent;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.link-badge.compact {
+  padding: 2px 8px;
+  font-size: 11px;
+  gap: 4px;
+}
+
+.link-badge-anchor {
+  color: inherit;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.link-badge-anchor:hover {
+  text-decoration: underline;
+}
+
+.link-delete-btn {
+  background: transparent;
+  border: none;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0 0 4px;
+  color: inherit;
+  opacity: 0.7;
+}
+
+.link-delete-btn:hover {
+  opacity: 1;
+}
+
+/* Light Theme Platform Colors */
+.link-youtube {
+  background: #fee2e2;
+  color: #b91c1c;
+  border-color: #fecaca;
+}
+
+.link-instagram {
+  background: #fdf2f8;
+  color: #be185d;
+  border-color: #fbcfe8;
+}
+
+.link-github {
+  background: #f1f5f9;
+  color: #1e293b;
+  border-color: #cbd5e1;
+}
+
+.link-gdrive {
+  background: #ecfdf5;
+  color: #047857;
+  border-color: #a7f3d0;
+}
+
+.link-linkedin {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-color: #bfdbfe;
+}
+
+.link-twitter {
+  background: #f8fafc;
+  color: #0f172a;
+  border-color: #e2e8f0;
+}
+
+.link-wikipedia {
+  background: #f8fafc;
+  color: #334155;
+  border-color: #e2e8f0;
+}
+
+.link-web {
+  background: #eef2ff;
+  color: #4338ca;
+  border-color: #c7d2fe;
+}
+
+/* Dark Theme Platform Colors */
+body.dark-theme .link-youtube {
+  background: #450a0a !important;
+  color: #fca5a5 !important;
+  border-color: #7f1d1d !important;
+}
+
+body.dark-theme .link-instagram {
+  background: #4a044e !important;
+  color: #f472b6 !important;
+  border-color: #831843 !important;
+}
+
+body.dark-theme .link-github {
+  background: #0f172a !important;
+  color: #e2e8f0 !important;
+  border-color: #334155 !important;
+}
+
+body.dark-theme .link-gdrive {
+  background: #064e3b !important;
+  color: #6ee7b7 !important;
+  border-color: #047857 !important;
+}
+
+body.dark-theme .link-linkedin {
+  background: #172554 !important;
+  color: #93c5fd !important;
+  border-color: #1e40af !important;
+}
+
+body.dark-theme .link-twitter {
+  background: #0f172a !important;
+  color: #f8fafc !important;
+  border-color: #334155 !important;
+}
+
+body.dark-theme .link-wikipedia {
+  background: #1e293b !important;
+  color: #e2e8f0 !important;
+  border-color: #475569 !important;
+}
+
+body.dark-theme .link-web {
+  background: #1e1b4b !important;
+  color: #a5b4fc !important;
+  border-color: #3730a3 !important;
+}
+
 
 
 

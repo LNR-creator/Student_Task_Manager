@@ -13,6 +13,7 @@ import {
   getNotificationSettings,
   saveNotificationSettings
 } from './services/notificationService';
+import { LinkBadge } from './components/LinkBadge';
 import './App.css';
 
 const DEFAULT_REMINDER_TIME = '09:00';
@@ -28,7 +29,7 @@ function getTaskDateTime(date, time) {
 }
 
 function getReferenceUrl(value) {
-  const trimmedValue = value.trim();
+  const trimmedValue = typeof value === 'string' ? value.trim() : '';
   if (!trimmedValue) return '';
 
   try {
@@ -41,6 +42,26 @@ function getReferenceUrl(value) {
   }
 }
 
+function normalizeLinks(links, fallbackLink) {
+  let list = [];
+  if (Array.isArray(links)) {
+    list = links;
+  } else if (typeof links === 'string' && links.trim()) {
+    list = [links.trim()];
+  } else if (typeof fallbackLink === 'string' && fallbackLink.trim()) {
+    list = [fallbackLink.trim()];
+  }
+
+  const valid = [];
+  for (const item of list) {
+    const parsed = getReferenceUrl(item);
+    if (parsed && !valid.includes(parsed)) {
+      valid.push(parsed);
+    }
+  }
+  return valid;
+}
+
 function normalizeSubtasks(list) {
   if (!Array.isArray(list)) return [];
   return list.map((item, index) => {
@@ -49,20 +70,34 @@ function normalizeSubtasks(list) {
         id: `st-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 6)}`,
         title: String(item || ''),
         link: '',
+        links: [],
         notes: '',
         completed: false,
         subtasks: []
       };
     }
+    const links = normalizeLinks(item.links, item.link);
     return {
       id: item.id || `st-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 6)}`,
       title: typeof item.title === 'string' ? item.title : '',
-      link: typeof item.link === 'string' ? item.link : '',
+      link: links[0] || (typeof item.link === 'string' ? item.link : ''),
+      links,
       notes: typeof item.notes === 'string' ? item.notes : '',
       completed: Boolean(item.completed),
       subtasks: normalizeSubtasks(item.subtasks)
     };
   });
+}
+
+function normalizeTask(task) {
+  if (!task || typeof task !== 'object') return task;
+  const links = normalizeLinks(task.links, task.link);
+  return {
+    ...task,
+    link: links[0] || (typeof task.link === 'string' ? task.link : ''),
+    links,
+    subtasks: normalizeSubtasks(task.subtasks)
+  };
 }
 
 function findSubtask(subtasks, id) {
@@ -158,6 +193,7 @@ function App() {
   const [categoryFilter, setCategoryFilter] = useState('All');
   const [sortOrder, setSortOrder] = useState('default');
   const [taskLink, setTaskLink] = useState('');
+  const [taskLinks, setTaskLinks] = useState([]);
 
   // Task states
   const [tasks, setTasks] = useState(() => {
@@ -166,10 +202,7 @@ function App() {
     try {
       const parsed = JSON.parse(savedTasks);
       if (Array.isArray(parsed)) {
-        return parsed.map((t) => ({
-          ...t,
-          subtasks: normalizeSubtasks(t.subtasks)
-        }));
+        return parsed.map(normalizeTask);
       }
       return [];
     } catch {
@@ -382,6 +415,21 @@ function App() {
     if (categoryFilter === categoryToDelete) setCategoryFilter('All');
   }
 
+  function handleAddCreationLink() {
+    if (!taskLink.trim()) return;
+    const validated = getReferenceUrl(taskLink);
+    if (!validated) {
+      alert('Please enter a valid http or https URL.');
+      return;
+    }
+    if (taskLinks.includes(validated)) {
+      alert('This link has already been added.');
+      return;
+    }
+    setTaskLinks((prev) => [...prev, validated]);
+    setTaskLink('');
+  }
+
   // Add task
   async function handleAddTask() {
 
@@ -395,10 +443,16 @@ function App() {
       return;
     }
 
-    const link = getReferenceUrl(taskLink);
-    if (link === null) {
-      alert('Enter a valid http or https reference link.');
-      return;
+    const linksToAdd = [...taskLinks];
+    if (taskLink.trim()) {
+      const link = getReferenceUrl(taskLink);
+      if (link === null) {
+        alert('Enter a valid http or https reference link.');
+        return;
+      }
+      if (link && !linksToAdd.includes(link)) {
+        linksToAdd.push(link);
+      }
     }
 
     const startDateTime = getTaskDateTime(startDate, startTime);
@@ -415,7 +469,8 @@ function App() {
     const newTask = {
       id: Date.now(),
       title: taskInput.trim(),
-      link,
+      link: linksToAdd[0] || '',
+      links: linksToAdd,
       category: category,
       startDate,
       startTime,
@@ -437,6 +492,7 @@ function App() {
     setDueDate('');
     setEndTime(DEFAULT_REMINDER_TIME);
     setTaskLink('');
+    setTaskLinks([]);
   }
 
   // Complete task
@@ -515,18 +571,45 @@ function App() {
     });
   }
 
-  function handleSaveTaskReference(event) {
-    event.preventDefault();
+  function handleAddTaskLink(event) {
+    if (event) event.preventDefault();
     if (!selectedTask) return;
 
-    const link = getReferenceUrl(taskReferenceDraft);
-    if (link === null) {
+    const url = getReferenceUrl(taskReferenceDraft);
+    if (!url) {
       alert('Enter a valid http or https reference link.');
       return;
     }
 
-    updateTask(selectedTask.id, { link });
-    setTaskReferenceDraft(link);
+    const currentLinks = selectedTask.links && selectedTask.links.length > 0
+      ? selectedTask.links
+      : (selectedTask.link ? [selectedTask.link] : []);
+
+    if (currentLinks.includes(url)) {
+      alert('This reference link has already been added.');
+      return;
+    }
+
+    const nextLinks = [...currentLinks, url];
+    updateTask(selectedTask.id, {
+      links: nextLinks,
+      link: nextLinks[0] || ''
+    });
+    setTaskReferenceDraft('');
+  }
+
+  function handleDeleteTaskLink(urlToDelete) {
+    if (!selectedTask) return;
+
+    const currentLinks = selectedTask.links && selectedTask.links.length > 0
+      ? selectedTask.links
+      : (selectedTask.link ? [selectedTask.link] : []);
+
+    const nextLinks = currentLinks.filter((item) => item !== urlToDelete);
+    updateTask(selectedTask.id, {
+      links: nextLinks,
+      link: nextLinks[0] || ''
+    });
   }
 
   function handleAddSubtask(event) {
@@ -540,10 +623,12 @@ function App() {
       return;
     }
 
+    const links = link ? [link] : [];
     const newSubtask = {
       id: `st-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       title,
       link: link || '',
+      links,
       notes: '',
       completed: false,
       subtasks: []
@@ -599,23 +684,53 @@ function App() {
     updateTask(selectedTask.id, { subtasks: updatedSubtasks });
   }
 
-  function handleSaveSubtaskReference(event) {
-    event.preventDefault();
+  function handleAddSubtaskLink(event) {
+    if (event) event.preventDefault();
     if (!selectedTask || subtaskPath.length === 0) return;
     const currentSubtaskId = subtaskPath[subtaskPath.length - 1];
 
-    const link = getReferenceUrl(subtaskReferenceDraft);
-    if (link === null) {
+    const url = getReferenceUrl(subtaskReferenceDraft);
+    if (!url) {
       alert('Enter a valid http or https reference link.');
       return;
     }
 
+    const currentSubtask = findSubtask(selectedTask.subtasks || [], currentSubtaskId);
+    const currentLinks = currentSubtask?.links && currentSubtask.links.length > 0
+      ? currentSubtask.links
+      : (currentSubtask?.link ? [currentSubtask.link] : []);
+
+    if (currentLinks.includes(url)) {
+      alert('This reference link has already been added.');
+      return;
+    }
+
+    const nextLinks = [...currentLinks, url];
     const updatedSubtasks = updateSubtaskInTree(selectedTask.subtasks || [], currentSubtaskId, (st) => ({
       ...st,
-      link
+      links: nextLinks,
+      link: nextLinks[0] || ''
     }));
     updateTask(selectedTask.id, { subtasks: updatedSubtasks });
-    setSubtaskReferenceDraft(link);
+    setSubtaskReferenceDraft('');
+  }
+
+  function handleDeleteSubtaskLink(urlToDelete) {
+    if (!selectedTask || subtaskPath.length === 0) return;
+    const currentSubtaskId = subtaskPath[subtaskPath.length - 1];
+
+    const currentSubtask = findSubtask(selectedTask.subtasks || [], currentSubtaskId);
+    const currentLinks = currentSubtask?.links && currentSubtask.links.length > 0
+      ? currentSubtask.links
+      : (currentSubtask?.link ? [currentSubtask.link] : []);
+
+    const nextLinks = currentLinks.filter((item) => item !== urlToDelete);
+    const updatedSubtasks = updateSubtaskInTree(selectedTask.subtasks || [], currentSubtaskId, (st) => ({
+      ...st,
+      links: nextLinks,
+      link: nextLinks[0] || ''
+    }));
+    updateTask(selectedTask.id, { subtasks: updatedSubtasks });
   }
 
   // Export tasks to JSON (Fully compatible with Android & Web)
@@ -695,6 +810,7 @@ function App() {
           (task.dueDate === undefined || typeof task.dueDate === 'string') &&
           (task.endTime === undefined || isValidTime(task.endTime)) &&
           (task.link === undefined || typeof task.link === 'string') &&
+          (task.links === undefined || Array.isArray(task.links)) &&
           (task.subtasks === undefined || Array.isArray(task.subtasks))
         );
 
@@ -715,19 +831,7 @@ function App() {
             ])
           ]);
 
-          setTasks(importedTasks.map((task) => ({
-            id: task.id,
-            title: task.title.trim(),
-            category: task.category,
-            startDate: task.startDate || '',
-            startTime: isValidTime(task.startTime) ? task.startTime : DEFAULT_REMINDER_TIME,
-            dueDate: task.dueDate || '',
-            endTime: isValidTime(task.endTime) ? task.endTime : DEFAULT_REMINDER_TIME,
-            link: getReferenceUrl(task.link || '') || '',
-            completed: task.completed,
-            notes: typeof task.notes === 'string' ? task.notes : '',
-            subtasks: normalizeSubtasks(task.subtasks)
-          })));
+          setTasks(importedTasks.map(normalizeTask));
 
           alert('Tasks imported successfully!');
 
@@ -916,29 +1020,37 @@ function App() {
                 </div>
               </header>
 
-              <form className="reference-form" onSubmit={handleSaveSubtaskReference}>
-                <label className="detail-label" htmlFor="subtask-reference">Reference link</label>
-                <div>
+              <form className="reference-form" onSubmit={handleAddSubtaskLink}>
+                <label className="detail-label" htmlFor="subtask-reference">Reference links</label>
+                <div className="link-input-group">
                   <input
                     id="subtask-reference"
                     type="url"
-                    placeholder="https://example.com"
+                    placeholder="https://youtube.com/..., https://instagram.com/..."
                     value={subtaskReferenceDraft}
                     onChange={(event) => setSubtaskReferenceDraft(event.target.value)}
                   />
-                  <button type="submit" className="category-add-btn">Save link</button>
+                  <button type="submit" className="category-add-btn">+ Add link</button>
                 </div>
               </form>
-              {getReferenceUrl(currentSubtask.link || '') && (
-                <a
-                  href={getReferenceUrl(currentSubtask.link)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="task-link detail-reference-link"
-                >
-                  🔗 Open subtask reference
-                </a>
-              )}
+
+              {(() => {
+                const allLinks = (currentSubtask.links && currentSubtask.links.length > 0)
+                  ? currentSubtask.links
+                  : (currentSubtask.link ? [currentSubtask.link] : []);
+                if (allLinks.length === 0) return null;
+                return (
+                  <div className="link-badge-container" style={{ margin: '8px 0 16px' }}>
+                    {allLinks.map((url) => (
+                      <LinkBadge
+                        key={url}
+                        url={url}
+                        onDelete={() => handleDeleteSubtaskLink(url)}
+                      />
+                    ))}
+                  </div>
+                );
+              })()}
 
               <label className="detail-label" htmlFor="subtask-notes">Notes</label>
               <textarea
@@ -1041,29 +1153,37 @@ function App() {
                 <button type="submit" className="category-add-btn">Save dates &amp; reminders</button>
               </form>
 
-              <form className="reference-form" onSubmit={handleSaveTaskReference}>
-                <label className="detail-label" htmlFor="task-reference">Reference link</label>
-                <div>
+              <form className="reference-form" onSubmit={handleAddTaskLink}>
+                <label className="detail-label" htmlFor="task-reference">Reference links</label>
+                <div className="link-input-group">
                   <input
                     id="task-reference"
                     type="url"
-                    placeholder="https://example.com"
+                    placeholder="https://youtube.com/..., https://instagram.com/..."
                     value={taskReferenceDraft}
                     onChange={(event) => setTaskReferenceDraft(event.target.value)}
                   />
-                  <button type="submit" className="category-add-btn">Save link</button>
+                  <button type="submit" className="category-add-btn">+ Add link</button>
                 </div>
               </form>
-              {getReferenceUrl(selectedTask.link || '') && (
-                <a
-                  href={getReferenceUrl(selectedTask.link)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="task-link detail-reference-link"
-                >
-                  🔗 Open task reference
-                </a>
-              )}
+
+              {(() => {
+                const allLinks = (selectedTask.links && selectedTask.links.length > 0)
+                  ? selectedTask.links
+                  : (selectedTask.link ? [selectedTask.link] : []);
+                if (allLinks.length === 0) return null;
+                return (
+                  <div className="link-badge-container" style={{ margin: '8px 0 16px' }}>
+                    {allLinks.map((url) => (
+                      <LinkBadge
+                        key={url}
+                        url={url}
+                        onDelete={() => handleDeleteTaskLink(url)}
+                      />
+                    ))}
+                  </div>
+                );
+              })()}
 
               <label className="detail-label" htmlFor="task-notes">Notes</label>
               <textarea
@@ -1146,25 +1266,24 @@ function App() {
                           {subtask.notes && (
                             <span className="subtask-note-indicator">📝 Note</span>
                           )}
-                          {getReferenceUrl(subtask.link || '') && (
-                            <span className="subtask-note-indicator">🔗 Link</span>
-                          )}
                           <span className="subtask-note-indicator" style={{ color: '#2563eb' }}>
                             Open subtask →
                           </span>
                         </div>
                       </button>
-                      {getReferenceUrl(subtask.link || '') && (
-                        <a
-                          href={getReferenceUrl(subtask.link)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="task-link"
-                          onClick={(event) => event.stopPropagation()}
-                        >
-                          Open link
-                        </a>
-                      )}
+                      {(() => {
+                        const allLinks = (subtask.links && subtask.links.length > 0)
+                          ? subtask.links
+                          : (subtask.link ? [subtask.link] : []);
+                        if (allLinks.length === 0) return null;
+                        return (
+                          <div className="link-badge-container compact">
+                            {allLinks.map((url) => (
+                              <LinkBadge key={url} url={url} compact />
+                            ))}
+                          </div>
+                        );
+                      })()}
                       <button
                         type="button"
                         className="subtask-delete-btn"
@@ -1424,13 +1543,40 @@ function App() {
             value={taskNotesInput}
             onChange={(e) => setTaskNotesInput(e.target.value)}
           />
-          <input
-            type="url"
-            placeholder="Reference link (optional)"
-            aria-label="Task reference link"
-            value={taskLink}
-            onChange={(e) => setTaskLink(e.target.value)}
-          />
+          <div className="link-input-group">
+            <input
+              type="url"
+              placeholder="Reference link (e.g. YouTube, Instagram, GitHub...)"
+              aria-label="Task reference link"
+              value={taskLink}
+              onChange={(e) => setTaskLink(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleAddCreationLink();
+                }
+              }}
+            />
+            <button
+              type="button"
+              className="link-add-inline-btn"
+              onClick={handleAddCreationLink}
+              title="Add reference link"
+            >
+              + Link
+            </button>
+          </div>
+          {taskLinks.length > 0 && (
+            <div className="link-badge-container">
+              {taskLinks.map((url) => (
+                <LinkBadge
+                  key={url}
+                  url={url}
+                  onDelete={(u) => setTaskLinks((prev) => prev.filter((item) => item !== u))}
+                />
+              ))}
+            </div>
+          )}
 
           <select
             value={category}
@@ -1650,16 +1796,19 @@ function App() {
                         ) : null;
                       })()}
 
-                      {getReferenceUrl(task.link || '') && (
-                        <a
-                          href={getReferenceUrl(task.link)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="task-link"
-                        >
-                          🔗 Open Reference
-                        </a>
-                      )}
+                      {(() => {
+                        const allLinks = (task.links && task.links.length > 0)
+                          ? task.links
+                          : (task.link ? [task.link] : []);
+                        if (allLinks.length === 0) return null;
+                        return (
+                          <div className="link-badge-container compact">
+                            {allLinks.map((url) => (
+                              <LinkBadge key={url} url={url} compact />
+                            ))}
+                          </div>
+                        );
+                      })()}
 
                     </div>
 
