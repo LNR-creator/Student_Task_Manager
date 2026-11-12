@@ -1,7 +1,20 @@
 
 import { useState, useEffect } from 'react';
+import { Capacitor } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import './App.css';
+
+const DEFAULT_REMINDER_TIME = '09:00';
+
+function isValidTime(value) {
+  return typeof value === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+}
+
+function getTaskDateTime(date, time) {
+  if (!date) return null;
+  const dateTime = new Date(`${date}T${isValidTime(time) ? time : DEFAULT_REMINDER_TIME}:00`);
+  return Number.isNaN(dateTime.getTime()) ? null : dateTime;
+}
 
 function getReferenceUrl(value) {
   const trimmedValue = value.trim();
@@ -36,16 +49,17 @@ function getTaskReminders(tasks) {
         id: getReminderId(task.id, 'start'),
         title: 'Task starts today',
         body: task.title,
-        schedule: { at: new Date(`${task.startDate}T09:00:00`) }
+        schedule: { at: getTaskDateTime(task.startDate, task.startTime) }
       },
       task.dueDate && {
         id: getReminderId(task.id, 'deadline'),
         title: 'Task deadline today',
         body: task.title,
-        schedule: { at: new Date(`${task.dueDate}T09:00:00`) }
+        schedule: { at: getTaskDateTime(task.dueDate, task.endTime) }
       }
     ].filter((reminder) => (
-      reminder && !Number.isNaN(reminder.schedule.at.getTime()) &&
+      reminder && reminder.schedule.at instanceof Date &&
+      !Number.isNaN(reminder.schedule.at.getTime()) &&
       reminder.schedule.at.getTime() > now
     ));
   });
@@ -107,14 +121,21 @@ function App() {
   const [categoryInput, setCategoryInput] = useState('');
   const [category, setCategory] = useState('Study');
   const [startDate, setStartDate] = useState('');
+  const [startTime, setStartTime] = useState(DEFAULT_REMINDER_TIME);
   const [dueDate, setDueDate] = useState('');
+  const [endTime, setEndTime] = useState(DEFAULT_REMINDER_TIME);
   const [selectedTaskId, setSelectedTaskId] = useState(null);
   const [selectedSubtaskIndex, setSelectedSubtaskIndex] = useState(null);
   const [subtaskInput, setSubtaskInput] = useState('');
   const [subtaskReferenceInput, setSubtaskReferenceInput] = useState('');
   const [taskReferenceDraft, setTaskReferenceDraft] = useState('');
   const [subtaskReferenceDraft, setSubtaskReferenceDraft] = useState('');
-  const [taskDateDraft, setTaskDateDraft] = useState({ startDate: '', dueDate: '' });
+  const [taskDateDraft, setTaskDateDraft] = useState({
+    startDate: '',
+    startTime: DEFAULT_REMINDER_TIME,
+    dueDate: '',
+    endTime: DEFAULT_REMINDER_TIME
+  });
   const [notificationStatus, setNotificationStatus] = useState('');
   const [reminderSyncVersion, setReminderSyncVersion] = useState(0);
 
@@ -134,61 +155,138 @@ function App() {
     id: task.id,
     title: task.title,
     startDate: task.startDate || '',
+    startTime: task.startTime || DEFAULT_REMINDER_TIME,
     dueDate: task.dueDate || '',
+    endTime: task.endTime || DEFAULT_REMINDER_TIME,
     completed: task.completed
   })));
 
   useEffect(() => {
+    let cancelled = false;
+    const timeoutIds = [];
+
     async function synchronizeReminders() {
       try {
+        const notifications = getTaskReminders(JSON.parse(reminderTaskData));
+        if (notifications.length === 0) {
+          if (Capacitor.isNativePlatform()) {
+            const scheduledIds = JSON.parse(
+              localStorage.getItem('studentTaskReminderIds') || '[]'
+            );
+            if (!Array.isArray(scheduledIds)) {
+              throw new Error('Saved reminder IDs are invalid.');
+            }
+            if (scheduledIds.length > 0) {
+              await LocalNotifications.cancel({
+                notifications: scheduledIds.map((id) => ({ id }))
+              });
+            }
+            localStorage.removeItem('studentTaskReminderIds');
+          }
+          if (!cancelled) setNotificationStatus('');
+          return;
+        }
+
+        if (!Capacitor.isNativePlatform()) {
+          if (!('Notification' in window)) {
+            if (!cancelled) {
+              setNotificationStatus('This browser does not support notifications.');
+            }
+            return;
+          }
+          if (Notification.permission !== 'granted') {
+            if (!cancelled) {
+              setNotificationStatus('Enable browser notifications to receive task reminders.');
+            }
+            return;
+          }
+
+          notifications.forEach((notification) => {
+            const notifyWhenDue = () => {
+              if (cancelled) return;
+              const remaining = notification.schedule.at.getTime() - Date.now();
+              if (remaining > 0) {
+                timeoutIds.push(setTimeout(
+                  notifyWhenDue,
+                  Math.min(remaining, 2147483647)
+                ));
+                return;
+              }
+              new Notification(notification.title, { body: notification.body });
+            };
+            notifyWhenDue();
+          });
+          if (!cancelled) {
+            setNotificationStatus(
+              'Web reminders use the selected local times while this page is open. Browser or OS background limits may delay delivery.'
+            );
+          }
+          return;
+        }
+
         const scheduledIds = JSON.parse(
           localStorage.getItem('studentTaskReminderIds') || '[]'
         );
         if (!Array.isArray(scheduledIds)) {
           throw new Error('Saved reminder IDs are invalid.');
         }
-
-        const notifications = getTaskReminders(JSON.parse(reminderTaskData));
         if (scheduledIds.length > 0) {
           await LocalNotifications.cancel({
             notifications: scheduledIds.map((id) => ({ id }))
           });
         }
 
-        if (notifications.length === 0) {
-          localStorage.removeItem('studentTaskReminderIds');
-          setNotificationStatus('');
-          return;
-        }
-
         const permission = await LocalNotifications.checkPermissions();
         if (permission.display !== 'granted') {
           localStorage.removeItem('studentTaskReminderIds');
-          setNotificationStatus('Enable notifications to receive your task reminders.');
+          if (!cancelled) {
+            setNotificationStatus('Enable mobile notifications to receive your task reminders.');
+          }
           return;
         }
 
         await LocalNotifications.schedule({ notifications });
+        if (cancelled) return;
         localStorage.setItem(
           'studentTaskReminderIds',
           JSON.stringify(notifications.map(({ id }) => id))
         );
         setNotificationStatus(
-          'Reminders are scheduled for 9:00 AM on upcoming start dates and deadlines.'
+          'Mobile reminders are scheduled for the selected local start and end times.'
         );
       } catch (error) {
         console.error('Unable to synchronize task reminders:', error);
-        setNotificationStatus(
-          `Unable to schedule task reminders: ${error instanceof Error ? error.message : 'Unknown error'}`
-        );
+        if (!cancelled) {
+          setNotificationStatus(
+            `Unable to schedule task reminders: ${error instanceof Error ? error.message : 'Unknown error'}`
+          );
+        }
       }
     }
 
     synchronizeReminders();
+    return () => {
+      cancelled = true;
+      timeoutIds.forEach(clearTimeout);
+    };
   }, [reminderTaskData, reminderSyncVersion]);
 
   async function requestNotificationPermission() {
     try {
+      if (!Capacitor.isNativePlatform()) {
+        if (!('Notification' in window)) {
+          setNotificationStatus('This browser does not support notifications.');
+          return false;
+        }
+        const permission = await Notification.requestPermission();
+        if (permission === 'granted') {
+          setReminderSyncVersion((version) => version + 1);
+          return true;
+        }
+        setNotificationStatus('Browser notifications are disabled. The task was saved without reminders.');
+        return false;
+      }
+
       const currentPermission = await LocalNotifications.checkPermissions();
       if (currentPermission.display === 'granted') {
         setReminderSyncVersion((version) => version + 1);
@@ -273,12 +371,21 @@ function App() {
       return;
     }
 
-    if (startDate && dueDate && dueDate < startDate) {
+    const startDateTime = getTaskDateTime(startDate, startTime);
+    const dueDateTime = getTaskDateTime(dueDate, endTime);
+    if (startDateTime && dueDateTime && dueDateTime < startDateTime) {
       alert('The deadline cannot be before the start date.');
       return;
     }
 
-    if (getTaskReminders([{ id: Date.now(), title: taskInput.trim(), startDate, dueDate }]).length > 0) {
+    if (getTaskReminders([{
+      id: Date.now(),
+      title: taskInput.trim(),
+      startDate,
+      startTime,
+      dueDate,
+      endTime
+    }]).length > 0) {
       await requestNotificationPermission();
     }
 
@@ -288,7 +395,9 @@ function App() {
       link,
       category: category,
       startDate,
+      startTime,
       dueDate: dueDate,
+      endTime,
       completed: false,
       notes: '',
       subtasks: []
@@ -299,7 +408,9 @@ function App() {
     setTaskInput('');
     setCategory('Study');
     setStartDate('');
+    setStartTime(DEFAULT_REMINDER_TIME);
     setDueDate('');
+    setEndTime(DEFAULT_REMINDER_TIME);
     setTaskLink('');
   }
 
@@ -345,8 +456,15 @@ function App() {
     event.preventDefault();
     if (!selectedTask) return;
 
-    const { startDate: nextStartDate, dueDate: nextDueDate } = taskDateDraft;
-    if (nextStartDate && nextDueDate && nextDueDate < nextStartDate) {
+    const {
+      startDate: nextStartDate,
+      startTime: nextStartTime,
+      dueDate: nextDueDate,
+      endTime: nextEndTime
+    } = taskDateDraft;
+    const nextStartDateTime = getTaskDateTime(nextStartDate, nextStartTime);
+    const nextDueDateTime = getTaskDateTime(nextDueDate, nextEndTime);
+    if (nextStartDateTime && nextDueDateTime && nextDueDateTime < nextStartDateTime) {
       alert('The deadline cannot be before the start date.');
       return;
     }
@@ -354,14 +472,18 @@ function App() {
     if (getTaskReminders([{
       ...selectedTask,
       startDate: nextStartDate,
-      dueDate: nextDueDate
+      startTime: nextStartTime,
+      dueDate: nextDueDate,
+      endTime: nextEndTime
     }]).length > 0) {
       await requestNotificationPermission();
     }
 
     updateTask(selectedTask.id, {
       startDate: nextStartDate,
-      dueDate: nextDueDate
+      startTime: nextStartTime,
+      dueDate: nextDueDate,
+      endTime: nextEndTime
     });
   }
 
@@ -514,7 +636,9 @@ function App() {
           typeof task.category === 'string' &&
           typeof task.completed === 'boolean' &&
           (task.startDate === undefined || typeof task.startDate === 'string') &&
+          (task.startTime === undefined || isValidTime(task.startTime)) &&
           (task.dueDate === undefined || typeof task.dueDate === 'string') &&
+          (task.endTime === undefined || isValidTime(task.endTime)) &&
           (task.link === undefined || typeof task.link === 'string') &&
           (task.subtasks === undefined || Array.isArray(task.subtasks))
         );
@@ -541,7 +665,9 @@ function App() {
             title: task.title.trim(),
             category: task.category,
             startDate: task.startDate || '',
+            startTime: isValidTime(task.startTime) ? task.startTime : DEFAULT_REMINDER_TIME,
             dueDate: task.dueDate || '',
+            endTime: isValidTime(task.endTime) ? task.endTime : DEFAULT_REMINDER_TIME,
             link: getReferenceUrl(task.link || '') || '',
             completed: task.completed,
             notes: typeof task.notes === 'string' ? task.notes : '',
@@ -710,10 +836,14 @@ function App() {
               <div className="task-meta">
                 <span className="category-label">{selectedTask.category}</span>
                 {selectedTask.startDate && (
-                  <span className="date-label">Starts: {selectedTask.startDate}</span>
+                  <span className="date-label">
+                    Starts: {selectedTask.startDate} at {selectedTask.startTime || DEFAULT_REMINDER_TIME}
+                  </span>
                 )}
                 {selectedTask.dueDate && (
-                  <span className="date-label">Deadline: {selectedTask.dueDate}</span>
+                  <span className="date-label">
+                    Deadline: {selectedTask.dueDate} at {selectedTask.endTime || DEFAULT_REMINDER_TIME}
+                  </span>
                 )}
               </div>
             </div>
@@ -739,7 +869,18 @@ function App() {
               />
             </label>
             <label>
-              Deadline
+              Start time
+              <input
+                type="time"
+                value={taskDateDraft.startTime}
+                onChange={(event) => setTaskDateDraft((dates) => ({
+                  ...dates,
+                  startTime: event.target.value
+                }))}
+              />
+            </label>
+            <label>
+              Deadline date
               <input
                 type="date"
                 min={taskDateDraft.startDate || undefined}
@@ -747,6 +888,17 @@ function App() {
                 onChange={(event) => setTaskDateDraft((dates) => ({
                   ...dates,
                   dueDate: event.target.value
+                }))}
+              />
+            </label>
+            <label>
+              End time
+              <input
+                type="time"
+                value={taskDateDraft.endTime}
+                onChange={(event) => setTaskDateDraft((dates) => ({
+                  ...dates,
+                  endTime: event.target.value
                 }))}
               />
             </label>
@@ -992,16 +1144,34 @@ function App() {
               onChange={(e) => setStartDate(e.target.value)}
             />
           </label>
+          <label className="date-input-label">
+            Start time
+            <input
+              type="time"
+              aria-label="Task start time"
+              value={startTime}
+              onChange={(e) => setStartTime(e.target.value)}
+            />
+          </label>
 
           <label className="date-input-label">
-            Deadline
+            Deadline date
             <input
-            type="date"
-            aria-label="Task deadline"
-            min={startDate || undefined}
-            value={dueDate}
-            onChange={(e) => setDueDate(e.target.value)}
-          />
+              type="date"
+              aria-label="Task deadline date"
+              min={startDate || undefined}
+              value={dueDate}
+              onChange={(e) => setDueDate(e.target.value)}
+            />
+          </label>
+          <label className="date-input-label">
+            End time
+            <input
+              type="time"
+              aria-label="Task end time"
+              value={endTime}
+              onChange={(e) => setEndTime(e.target.value)}
+            />
           </label>
 
           <button onClick={handleAddTask}>
@@ -1010,8 +1180,9 @@ function App() {
 
         </div>
         <p className="reminder-help">
-          Reminders are sent at 9:00 AM local time on upcoming start dates and deadlines.
-          On the web, keep this page open to receive them.
+          Reminders use the selected start and end times in your device&apos;s local time zone.
+          Mobile reminders are scheduled by the OS. Web reminders require this page to stay open,
+          and browser or OS background limits may delay delivery.
         </p>
 
         <section className="category-manager" aria-labelledby="category-manager-title">
@@ -1132,7 +1303,9 @@ function App() {
                         setTaskReferenceDraft(task.link || '');
                         setTaskDateDraft({
                           startDate: task.startDate || '',
-                          dueDate: task.dueDate || ''
+                          startTime: task.startTime || DEFAULT_REMINDER_TIME,
+                          dueDate: task.dueDate || '',
+                          endTime: task.endTime || DEFAULT_REMINDER_TIME
                         });
                       }}
                     >
@@ -1148,13 +1321,13 @@ function App() {
 
                       {task.startDate && (
                         <span className="date-label">
-                          Starts: {task.startDate}
+                          Starts: {task.startDate} at {task.startTime || DEFAULT_REMINDER_TIME}
                         </span>
                       )}
 
                       {task.dueDate && (
                         <span className="date-label">
-                          Deadline: {task.dueDate}
+                          Deadline: {task.dueDate} at {task.endTime || DEFAULT_REMINDER_TIME}
                         </span>
                       )}
 
