@@ -931,9 +931,9 @@ function App() {
           onClick: isLast
             ? undefined
             : () => {
-                setSubtaskPath(subtaskPath.slice(0, i + 1));
-                setSubtaskReferenceDraft(match.link || '');
-              }
+              setSubtaskPath(subtaskPath.slice(0, i + 1));
+              setSubtaskReferenceDraft(match.link || '');
+            }
         });
         searchList = match.subtasks || [];
       }
@@ -1315,9 +1315,9 @@ function App() {
           <div>
             <h1>Student Tasks 📚</h1>
             <p>Plan your day. Achieve your goals.</p>
-            {notificationStatus && (
+            {/* {notificationStatus && (
               <p className="notification-status" role="status">{notificationStatus}</p>
-            )}
+            )} */}
           </div>
 
           <div className="header-actions">
