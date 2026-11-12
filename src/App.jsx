@@ -900,7 +900,7 @@ function App() {
               />
             </label>
             <label>
-              Deadline date
+              Due date (Deadline)
               <input
                 type="date"
                 min={taskDateDraft.startDate || undefined}
@@ -912,7 +912,7 @@ function App() {
               />
             </label>
             <label>
-              End time
+              Due time
               <input
                 type="time"
                 value={taskDateDraft.endTime}
@@ -1141,12 +1141,19 @@ function App() {
 
           <input
             type="text"
-            placeholder="Enter your task..."
+            placeholder="Enter your task title..."
             value={taskInput}
             onChange={(e) => setTaskInput(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') handleAddTask();
             }}
+          />
+          <input
+            type="text"
+            placeholder="Description / notes (optional)"
+            aria-label="Task description"
+            value={taskNotesInput}
+            onChange={(e) => setTaskNotesInput(e.target.value)}
           />
           <input
             type="url"
@@ -1185,7 +1192,7 @@ function App() {
           </label>
 
           <label className="date-input-label">
-            Deadline date
+            Due date (Deadline)
             <input
               type="date"
               aria-label="Task deadline date"
@@ -1195,10 +1202,10 @@ function App() {
             />
           </label>
           <label className="date-input-label">
-            End time
+            Due time
             <input
               type="time"
-              aria-label="Task end time"
+              aria-label="Task due time"
               value={endTime}
               onChange={(e) => setEndTime(e.target.value)}
             />
