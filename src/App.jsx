@@ -1,5 +1,6 @@
 
 import { useState, useEffect } from 'react';
+import { LocalNotifications } from '@capacitor/local-notifications';
 import './App.css';
 
 const DEFAULT_CATEGORIES = [
@@ -15,6 +16,35 @@ const DEFAULT_CATEGORIES = [
 ];
 
 function App() {
+  async function testNotification() {
+  try {
+    const permission =
+      await LocalNotifications.requestPermissions();
+
+    if (permission.display !== 'granted') {
+      alert('Notification permission not granted.');
+      return;
+    }
+
+    await LocalNotifications.schedule({
+      notifications: [
+        {
+          id: 999,
+          title: 'Student Task Manager 📚',
+          body: 'Your notification system is working!',
+          schedule: {
+            at: new Date(Date.now() + 10000)
+          }
+        }
+      ]
+    });
+
+    alert('Test notification scheduled! Check your phone in 10 seconds.');
+  } catch (error) {
+    console.error('Notification error:', error);
+    alert('Unable to schedule notification.');
+  }
+}
 
   // Search and filter states
   const [searchTerm, setSearchTerm] = useState('');
@@ -566,6 +596,9 @@ function App() {
 
       {/* Dashboard */}
       <section className="dashboard">
+        <button type="button" onClick={testNotification}>
+  🔔 Test Notification
+</button>
 
         <div className="card">
           <h3>Total Tasks</h3>
