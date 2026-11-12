@@ -41,6 +41,104 @@ function getReferenceUrl(value) {
   }
 }
 
+function normalizeSubtasks(list) {
+  if (!Array.isArray(list)) return [];
+  return list.map((item, index) => {
+    if (!item || typeof item !== 'object') {
+      return {
+        id: `st-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 6)}`,
+        title: String(item || ''),
+        link: '',
+        notes: '',
+        completed: false,
+        subtasks: []
+      };
+    }
+    return {
+      id: item.id || `st-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 6)}`,
+      title: typeof item.title === 'string' ? item.title : '',
+      link: typeof item.link === 'string' ? item.link : '',
+      notes: typeof item.notes === 'string' ? item.notes : '',
+      completed: Boolean(item.completed),
+      subtasks: normalizeSubtasks(item.subtasks)
+    };
+  });
+}
+
+function findSubtask(subtasks, id) {
+  if (!Array.isArray(subtasks)) return null;
+  for (const st of subtasks) {
+    if (st.id === id) return st;
+    if (st.subtasks && st.subtasks.length > 0) {
+      const found = findSubtask(st.subtasks, id);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+function updateSubtaskInTree(list, targetId, updateFn) {
+  if (!Array.isArray(list)) return [];
+  return list.map((item) => {
+    if (item.id === targetId) {
+      return updateFn(item);
+    }
+    if (item.subtasks && item.subtasks.length > 0) {
+      return {
+        ...item,
+        subtasks: updateSubtaskInTree(item.subtasks, targetId, updateFn)
+      };
+    }
+    return item;
+  });
+}
+
+function deleteSubtaskFromTree(list, targetId) {
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((item) => item.id !== targetId)
+    .map((item) => ({
+      ...item,
+      subtasks: item.subtasks ? deleteSubtaskFromTree(item.subtasks, targetId) : []
+    }));
+}
+
+function addSubtaskToTree(list, parentId, newSubtask) {
+  if (!Array.isArray(list)) return [];
+  return list.map((item) => {
+    if (item.id === parentId) {
+      return {
+        ...item,
+        subtasks: [...(item.subtasks || []), newSubtask]
+      };
+    }
+    if (item.subtasks && item.subtasks.length > 0) {
+      return {
+        ...item,
+        subtasks: addSubtaskToTree(item.subtasks, parentId, newSubtask)
+      };
+    }
+    return item;
+  });
+}
+
+function countSubtasksRecursive(list) {
+  let total = 0;
+  let completed = 0;
+  function walk(items) {
+    if (!Array.isArray(items)) return;
+    for (const item of items) {
+      total++;
+      if (item.completed) completed++;
+      if (item.subtasks && item.subtasks.length > 0) {
+        walk(item.subtasks);
+      }
+    }
+  }
+  walk(list);
+  return { total, completed };
+}
+
 const DEFAULT_CATEGORIES = [
   'Study',
   'Assignment',
@@ -64,7 +162,19 @@ function App() {
   // Task states
   const [tasks, setTasks] = useState(() => {
     const savedTasks = localStorage.getItem('studentTasks');
-    return savedTasks ? JSON.parse(savedTasks) : [];
+    if (!savedTasks) return [];
+    try {
+      const parsed = JSON.parse(savedTasks);
+      if (Array.isArray(parsed)) {
+        return parsed.map((t) => ({
+          ...t,
+          subtasks: normalizeSubtasks(t.subtasks)
+        }));
+      }
+      return [];
+    } catch {
+      return [];
+    }
   });
 
   const [taskInput, setTaskInput] = useState('');
@@ -102,7 +212,7 @@ function App() {
   const [dueDate, setDueDate] = useState('');
   const [endTime, setEndTime] = useState(DEFAULT_REMINDER_TIME);
   const [selectedTaskId, setSelectedTaskId] = useState(null);
-  const [selectedSubtaskIndex, setSelectedSubtaskIndex] = useState(null);
+  const [subtaskPath, setSubtaskPath] = useState([]);
   const [subtaskInput, setSubtaskInput] = useState('');
   const [subtaskReferenceInput, setSubtaskReferenceInput] = useState('');
   const [taskReferenceDraft, setTaskReferenceDraft] = useState('');
@@ -409,61 +519,69 @@ function App() {
       return;
     }
 
-    updateTask(selectedTask.id, {
-      subtasks: [
-        ...(selectedTask.subtasks || []),
-        { title, link, completed: false }
-      ]
-    });
+    const newSubtask = {
+      id: `st-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      title,
+      link: link || '',
+      notes: '',
+      completed: false,
+      subtasks: []
+    };
+
+    if (subtaskPath.length === 0) {
+      updateTask(selectedTask.id, {
+        subtasks: [...(selectedTask.subtasks || []), newSubtask]
+      });
+    } else {
+      const parentId = subtaskPath[subtaskPath.length - 1];
+      const updatedSubtasks = addSubtaskToTree(selectedTask.subtasks || [], parentId, newSubtask);
+      updateTask(selectedTask.id, { subtasks: updatedSubtasks });
+    }
+
     setSubtaskInput('');
     setSubtaskReferenceInput('');
   }
 
-  function handleToggleSubtask(subtaskIndex) {
+  function handleToggleSubtask(subtaskId) {
     if (!selectedTask) return;
-    updateTask(selectedTask.id, {
-      subtasks: (selectedTask.subtasks || []).map((subtask, index) => (
-        index === subtaskIndex
-          ? { ...subtask, completed: !subtask.completed }
-          : subtask
-      ))
-    });
+    const updatedSubtasks = updateSubtaskInTree(selectedTask.subtasks || [], subtaskId, (st) => ({
+      ...st,
+      completed: !st.completed
+    }));
+    updateTask(selectedTask.id, { subtasks: updatedSubtasks });
   }
 
-  function handleDeleteSubtask(subtaskIndex) {
+  function handleDeleteSubtask(subtaskId, subtaskTitle) {
     if (!selectedTask) return;
-    const subtaskToDelete = selectedTask.subtasks?.[subtaskIndex];
-    if (!subtaskToDelete) return;
 
     if (!window.confirm(
-      `Do you really want to delete subtask ${subtaskToDelete.title}\n\nMain Task : ${selectedTask.title}`
+      `Do you really want to delete subtask "${subtaskTitle}" and all of its nested subtasks?`
     )) {
       return;
     }
 
-    updateTask(selectedTask.id, {
-      subtasks: (selectedTask.subtasks || []).filter(
-        (_, index) => index !== subtaskIndex
-      )
-    });
-    if (selectedSubtaskIndex === subtaskIndex) setSelectedSubtaskIndex(null);
-    else if (selectedSubtaskIndex > subtaskIndex) {
-      setSelectedSubtaskIndex(selectedSubtaskIndex - 1);
+    const updatedSubtasks = deleteSubtaskFromTree(selectedTask.subtasks || [], subtaskId);
+    updateTask(selectedTask.id, { subtasks: updatedSubtasks });
+
+    if (subtaskPath.includes(subtaskId)) {
+      const idx = subtaskPath.indexOf(subtaskId);
+      setSubtaskPath(subtaskPath.slice(0, idx));
     }
   }
 
-  function handleUpdateSubtaskNote(subtaskIndex, notes) {
+  function handleUpdateSubtaskNote(subtaskId, notes) {
     if (!selectedTask) return;
-    updateTask(selectedTask.id, {
-      subtasks: (selectedTask.subtasks || []).map((subtask, index) => (
-        index === subtaskIndex ? { ...subtask, notes } : subtask
-      ))
-    });
+    const updatedSubtasks = updateSubtaskInTree(selectedTask.subtasks || [], subtaskId, (st) => ({
+      ...st,
+      notes
+    }));
+    updateTask(selectedTask.id, { subtasks: updatedSubtasks });
   }
 
   function handleSaveSubtaskReference(event) {
     event.preventDefault();
-    if (!selectedTask || selectedSubtaskIndex === null) return;
+    if (!selectedTask || subtaskPath.length === 0) return;
+    const currentSubtaskId = subtaskPath[subtaskPath.length - 1];
 
     const link = getReferenceUrl(subtaskReferenceDraft);
     if (link === null) {
@@ -471,11 +589,11 @@ function App() {
       return;
     }
 
-    updateTask(selectedTask.id, {
-      subtasks: (selectedTask.subtasks || []).map((subtask, index) => (
-        index === selectedSubtaskIndex ? { ...subtask, link } : subtask
-      ))
-    });
+    const updatedSubtasks = updateSubtaskInTree(selectedTask.subtasks || [], currentSubtaskId, (st) => ({
+      ...st,
+      link
+    }));
+    updateTask(selectedTask.id, { subtasks: updatedSubtasks });
     setSubtaskReferenceDraft(link);
   }
 
@@ -587,20 +705,7 @@ function App() {
             link: getReferenceUrl(task.link || '') || '',
             completed: task.completed,
             notes: typeof task.notes === 'string' ? task.notes : '',
-            subtasks: Array.isArray(task.subtasks)
-              ? task.subtasks.filter((subtask) =>
-                subtask &&
-                typeof subtask.title === 'string' &&
-                typeof subtask.completed === 'boolean'
-              ).map((subtask) => ({
-                title: subtask.title,
-                completed: subtask.completed,
-                notes: typeof subtask.notes === 'string' ? subtask.notes : '',
-                link: typeof subtask.link === 'string'
-                  ? getReferenceUrl(subtask.link) || ''
-                  : ''
-              }))
-              : []
+            subtasks: normalizeSubtasks(task.subtasks)
           })));
 
           alert('Tasks imported successfully!');
@@ -669,33 +774,114 @@ function App() {
   }
 
   if (selectedTask) {
-    const subtasks = Array.isArray(selectedTask.subtasks) ? selectedTask.subtasks : [];
-    const selectedSubtask = selectedSubtaskIndex === null
-      ? null
-      : subtasks[selectedSubtaskIndex];
+    const currentSubtask = subtaskPath.length > 0
+      ? findSubtask(selectedTask.subtasks || [], subtaskPath[subtaskPath.length - 1])
+      : null;
+
+    const currentSubtasksList = currentSubtask
+      ? (currentSubtask.subtasks || [])
+      : (selectedTask.subtasks || []);
+
+    const currentSubtaskCounts = countSubtasksRecursive(currentSubtasksList);
+
+    const breadcrumbs = [
+      {
+        title: selectedTask.title,
+        onClick: () => {
+          setSubtaskPath([]);
+          setSubtaskReferenceDraft('');
+        }
+      }
+    ];
+
+    let searchList = selectedTask.subtasks || [];
+    for (let i = 0; i < subtaskPath.length; i++) {
+      const id = subtaskPath[i];
+      const match = (searchList || []).find((s) => s.id === id);
+      if (match) {
+        const isLast = i === subtaskPath.length - 1;
+        breadcrumbs.push({
+          title: match.title,
+          isCurrent: isLast,
+          onClick: isLast
+            ? undefined
+            : () => {
+                setSubtaskPath(subtaskPath.slice(0, i + 1));
+                setSubtaskReferenceDraft(match.link || '');
+              }
+        });
+        searchList = match.subtasks || [];
+      }
+    }
 
     return (
       <main className="app-container">
         <section className="task-section task-detail">
-          {selectedSubtask ? (
-            <>
-              <button
-                type="button"
-                className="back-btn"
-                onClick={() => setSelectedSubtaskIndex(null)}
-              >
-                ← Back to {selectedTask.title}
-              </button>
+          {subtaskPath.length > 0 ? (
+            <button
+              type="button"
+              className="back-btn"
+              onClick={() => {
+                const nextPath = subtaskPath.slice(0, -1);
+                setSubtaskPath(nextPath);
+                if (nextPath.length > 0) {
+                  const parentSub = findSubtask(selectedTask.subtasks || [], nextPath[nextPath.length - 1]);
+                  setSubtaskReferenceDraft(parentSub?.link || '');
+                } else {
+                  setSubtaskReferenceDraft('');
+                }
+              }}
+            >
+              ← Back to {breadcrumbs[breadcrumbs.length - 2]?.title || selectedTask.title}
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="back-btn"
+              onClick={() => {
+                setSelectedTaskId(null);
+                setSubtaskPath([]);
+                setSubtaskInput('');
+              }}
+            >
+              ← Back to tasks
+            </button>
+          )}
 
+          {/* Breadcrumb Hierarchy */}
+          <nav className="breadcrumbs" aria-label="Task Hierarchy">
+            {breadcrumbs.map((crumb, idx) => (
+              <span key={idx} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                {idx > 0 && <span className="breadcrumb-separator">›</span>}
+                {crumb.isCurrent ? (
+                  <span className="breadcrumb-current">{crumb.title}</span>
+                ) : (
+                  <button
+                    type="button"
+                    className="breadcrumb-btn"
+                    onClick={crumb.onClick}
+                  >
+                    {crumb.title}
+                  </button>
+                )}
+              </span>
+            ))}
+          </nav>
+
+          {currentSubtask ? (
+            <>
               <header className="task-detail-header">
                 <div>
-                  <p className="task-detail-eyebrow">Subtask notes</p>
-                  <h1>{selectedSubtask.title}</h1>
-                  <p className="subtask-parent-label">Main Task: {selectedTask.title}</p>
+                  <p className="task-detail-eyebrow">Subtask (Level {subtaskPath.length})</p>
+                  <h1>{currentSubtask.title}</h1>
                 </div>
-                <span className={selectedSubtask.completed ? 'detail-status completed' : 'detail-status'}>
-                  {selectedSubtask.completed ? 'Completed' : 'In progress'}
-                </span>
+                <button
+                  type="button"
+                  className={currentSubtask.completed ? 'detail-status-btn completed' : 'detail-status-btn'}
+                  onClick={() => handleToggleSubtask(currentSubtask.id)}
+                >
+                  {currentSubtask.completed ? '✓ Completed' : '○ In progress'}
+                </button>
               </header>
 
               <form className="reference-form" onSubmit={handleSaveSubtaskReference}>
@@ -711,9 +897,9 @@ function App() {
                   <button type="submit" className="category-add-btn">Save link</button>
                 </div>
               </form>
-              {getReferenceUrl(selectedSubtask.link || '') && (
+              {getReferenceUrl(currentSubtask.link || '') && (
                 <a
-                  href={getReferenceUrl(selectedSubtask.link)}
+                  href={getReferenceUrl(currentSubtask.link)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="task-link detail-reference-link"
@@ -727,150 +913,150 @@ function App() {
                 id="subtask-notes"
                 className="task-notes"
                 placeholder="Write your notes about this subtask..."
-                value={selectedSubtask.notes || ''}
-                onChange={(event) => handleUpdateSubtaskNote(selectedSubtaskIndex, event.target.value)}
+                value={currentSubtask.notes || ''}
+                onChange={(event) => handleUpdateSubtaskNote(currentSubtask.id, event.target.value)}
               />
             </>
           ) : (
             <>
-          <button
-            type="button"
-            className="back-btn"
-            onClick={() => {
-              setSelectedTaskId(null);
-              setSelectedSubtaskIndex(null);
-              setSubtaskInput('');
-            }}
-          >
-            ← Back to tasks
-          </button>
+              <header className="task-detail-header">
+                <div>
+                  <p className="task-detail-eyebrow">Task notes</p>
+                  <h1>{selectedTask.title}</h1>
+                  <div className="task-meta">
+                    <span className="category-label">{selectedTask.category}</span>
+                    {selectedTask.startDate && (
+                      <span className="date-label">
+                        Starts: {selectedTask.startDate} at {selectedTask.startTime || DEFAULT_REMINDER_TIME}
+                      </span>
+                    )}
+                    {selectedTask.dueDate && (
+                      <span className={isTaskOverdue(selectedTask) ? 'date-label overdue' : 'date-label'}>
+                        Deadline: {selectedTask.dueDate} at {selectedTask.dueTime || selectedTask.endTime || DEFAULT_REMINDER_TIME}
+                      </span>
+                    )}
+                    {isTaskOverdue(selectedTask) && (
+                      <span className="overdue-tag">🚨 Overdue</span>
+                    )}
+                  </div>
+                </div>
+                <span className={selectedTask.completed ? 'detail-status completed' : 'detail-status'}>
+                  {selectedTask.completed ? 'Completed' : 'In progress'}
+                </span>
+              </header>
 
-          <header className="task-detail-header">
-            <div>
-              <p className="task-detail-eyebrow">Task notes</p>
-              <h1>{selectedTask.title}</h1>
-              <div className="task-meta">
-                <span className="category-label">{selectedTask.category}</span>
-                {selectedTask.startDate && (
-                  <span className="date-label">
-                    Starts: {selectedTask.startDate} at {selectedTask.startTime || DEFAULT_REMINDER_TIME}
-                  </span>
-                )}
-                {selectedTask.dueDate && (
-                  <span className={isTaskOverdue(selectedTask) ? 'date-label overdue' : 'date-label'}>
-                    Deadline: {selectedTask.dueDate} at {selectedTask.dueTime || selectedTask.endTime || DEFAULT_REMINDER_TIME}
-                  </span>
-                )}
-                {isTaskOverdue(selectedTask) && (
-                  <span className="overdue-tag">🚨 Overdue</span>
-                )}
-              </div>
-            </div>
-            <span className={selectedTask.completed ? 'detail-status completed' : 'detail-status'}>
-              {selectedTask.completed ? 'Completed' : 'In progress'}
-            </span>
-          </header>
+              {notificationStatus && (
+                <p className="notification-status" role="status">{notificationStatus}</p>
+              )}
 
-          {notificationStatus && (
-            <p className="notification-status" role="status">{notificationStatus}</p>
+              <form className="task-date-form" onSubmit={handleSaveTaskDates}>
+                <label>
+                  Start date
+                  <input
+                    type="date"
+                    value={taskDateDraft.startDate}
+                    onChange={(event) => setTaskDateDraft((dates) => ({
+                      ...dates,
+                      startDate: event.target.value
+                    }))}
+                  />
+                </label>
+                <label>
+                  Start time
+                  <input
+                    type="time"
+                    value={taskDateDraft.startTime}
+                    onChange={(event) => setTaskDateDraft((dates) => ({
+                      ...dates,
+                      startTime: event.target.value
+                    }))}
+                  />
+                </label>
+                <label>
+                  Due date (Deadline)
+                  <input
+                    type="date"
+                    min={taskDateDraft.startDate || undefined}
+                    value={taskDateDraft.dueDate}
+                    onChange={(event) => setTaskDateDraft((dates) => ({
+                      ...dates,
+                      dueDate: event.target.value
+                    }))}
+                  />
+                </label>
+                <label>
+                  Due time
+                  <input
+                    type="time"
+                    value={taskDateDraft.endTime}
+                    onChange={(event) => setTaskDateDraft((dates) => ({
+                      ...dates,
+                      endTime: event.target.value
+                    }))}
+                  />
+                </label>
+                <button type="submit" className="category-add-btn">Save dates &amp; reminders</button>
+              </form>
+
+              <form className="reference-form" onSubmit={handleSaveTaskReference}>
+                <label className="detail-label" htmlFor="task-reference">Reference link</label>
+                <div>
+                  <input
+                    id="task-reference"
+                    type="url"
+                    placeholder="https://example.com"
+                    value={taskReferenceDraft}
+                    onChange={(event) => setTaskReferenceDraft(event.target.value)}
+                  />
+                  <button type="submit" className="category-add-btn">Save link</button>
+                </div>
+              </form>
+              {getReferenceUrl(selectedTask.link || '') && (
+                <a
+                  href={getReferenceUrl(selectedTask.link)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="task-link detail-reference-link"
+                >
+                  🔗 Open task reference
+                </a>
+              )}
+
+              <label className="detail-label" htmlFor="task-notes">Notes</label>
+              <textarea
+                id="task-notes"
+                className="task-notes"
+                placeholder="Write your notes about this task..."
+                value={selectedTask.notes || ''}
+                onChange={(event) => updateTask(selectedTask.id, { notes: event.target.value })}
+              />
+            </>
           )}
 
-          <form className="task-date-form" onSubmit={handleSaveTaskDates}>
-            <label>
-              Start date
-              <input
-                type="date"
-                value={taskDateDraft.startDate}
-                onChange={(event) => setTaskDateDraft((dates) => ({
-                  ...dates,
-                  startDate: event.target.value
-                }))}
-              />
-            </label>
-            <label>
-              Start time
-              <input
-                type="time"
-                value={taskDateDraft.startTime}
-                onChange={(event) => setTaskDateDraft((dates) => ({
-                  ...dates,
-                  startTime: event.target.value
-                }))}
-              />
-            </label>
-            <label>
-              Due date (Deadline)
-              <input
-                type="date"
-                min={taskDateDraft.startDate || undefined}
-                value={taskDateDraft.dueDate}
-                onChange={(event) => setTaskDateDraft((dates) => ({
-                  ...dates,
-                  dueDate: event.target.value
-                }))}
-              />
-            </label>
-            <label>
-              Due time
-              <input
-                type="time"
-                value={taskDateDraft.endTime}
-                onChange={(event) => setTaskDateDraft((dates) => ({
-                  ...dates,
-                  endTime: event.target.value
-                }))}
-              />
-            </label>
-            <button type="submit" className="category-add-btn">Save dates &amp; reminders</button>
-          </form>
-
-          <form className="reference-form" onSubmit={handleSaveTaskReference}>
-            <label className="detail-label" htmlFor="task-reference">Reference link</label>
-            <div>
-              <input
-                id="task-reference"
-                type="url"
-                placeholder="https://example.com"
-                value={taskReferenceDraft}
-                onChange={(event) => setTaskReferenceDraft(event.target.value)}
-              />
-              <button type="submit" className="category-add-btn">Save link</button>
-            </div>
-          </form>
-          {getReferenceUrl(selectedTask.link || '') && (
-            <a
-              href={getReferenceUrl(selectedTask.link)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="task-link detail-reference-link"
-            >
-              🔗 Open task reference
-            </a>
-          )}
-
-          <label className="detail-label" htmlFor="task-notes">Notes</label>
-          <textarea
-            id="task-notes"
-            className="task-notes"
-            placeholder="Write your notes about this task..."
-            value={selectedTask.notes || ''}
-            onChange={(event) => updateTask(selectedTask.id, { notes: event.target.value })}
-          />
-
+          {/* Subtasks Section (Available at both root task and any subtask level!) */}
           <section className="subtasks-section" aria-labelledby="subtasks-title">
             <div className="subtasks-heading">
               <div>
-                <h2 id="subtasks-title">Subtasks</h2>
-                <p>Break this task into smaller steps.</p>
+                <h2 id="subtasks-title">
+                  {currentSubtask ? `Subtasks of "${currentSubtask.title}"` : 'Subtasks'}
+                </h2>
+                <p>Break this {currentSubtask ? 'subtask' : 'task'} into smaller steps.</p>
               </div>
-              <span className="subtask-count">{subtasks.filter((item) => item.completed).length}/{subtasks.length}</span>
+              <span className="subtask-count">
+                {currentSubtasksList.filter((item) => item.completed).length}/{currentSubtasksList.length}
+                {currentSubtaskCounts.total > currentSubtasksList.length && (
+                  <span style={{ marginLeft: '6px', fontSize: '12px', color: '#64748b' }}>
+                    ({currentSubtaskCounts.completed}/{currentSubtaskCounts.total} total nested)
+                  </span>
+                )}
+              </span>
             </div>
 
             <form className="subtask-form" onSubmit={handleAddSubtask}>
               <input
                 type="text"
                 aria-label="New subtask"
-                placeholder="Add a subtask..."
+                placeholder={currentSubtask ? `Add subtask to "${currentSubtask.title}"...` : 'Add a subtask...'}
                 value={subtaskInput}
                 onChange={(event) => setSubtaskInput(event.target.value)}
               />
@@ -884,63 +1070,74 @@ function App() {
               <button type="submit" className="category-add-btn">Add subtask</button>
             </form>
 
-            {subtasks.length > 0 ? (
+            {currentSubtasksList.length > 0 ? (
               <ul className="subtask-list">
-                {subtasks.map((subtask, index) => (
-                  <li className="subtask-item" key={`${index}-${subtask.title}`}>
-                    <label>
-                      <input
-                        type="checkbox"
-                        checked={subtask.completed}
-                        onChange={() => handleToggleSubtask(index)}
-                      />
-                    </label>
-                    <button
-                      type="button"
-                      className={`subtask-title-btn${subtask.completed ? ' subtask-completed' : ''}`}
-                      onClick={() => {
-                        setSelectedSubtaskIndex(index);
-                        setSubtaskReferenceDraft(subtask.link || '');
-                      }}
-                    >
-                      <span>
-                        {subtask.title}
-                      </span>
-                      <span className="subtask-note-indicator">
-                        {subtask.notes ? 'View / edit note' : 'Add note'}
-                      </span>
-                      {getReferenceUrl(subtask.link || '') && (
-                        <span className="subtask-note-indicator">Reference link added</span>
-                      )}
-                    </button>
-                    {getReferenceUrl(subtask.link || '') && (
-                      <a
-                        href={getReferenceUrl(subtask.link)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="task-link"
-                        onClick={(event) => event.stopPropagation()}
+                {currentSubtasksList.map((subtask) => {
+                  const nestedCounts = countSubtasksRecursive(subtask.subtasks || []);
+                  return (
+                    <li className="subtask-item" key={subtask.id}>
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={subtask.completed}
+                          onChange={() => handleToggleSubtask(subtask.id)}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        className={`subtask-title-btn${subtask.completed ? ' subtask-completed' : ''}`}
+                        onClick={() => {
+                          setSubtaskPath([...subtaskPath, subtask.id]);
+                          setSubtaskReferenceDraft(subtask.link || '');
+                        }}
                       >
-                        Open link
-                      </a>
-                    )}
-                    <button
-                      type="button"
-                      className="subtask-delete-btn"
-                      onClick={() => handleDeleteSubtask(index)}
-                      aria-label={`Delete subtask ${subtask.title}`}
-                    >
-                      ×
-                    </button>
-                  </li>
-                ))}
+                        <span>
+                          {subtask.title}
+                        </span>
+                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                          {nestedCounts.total > 0 && (
+                            <span className="subtask-badge">
+                              📁 {nestedCounts.total} {nestedCounts.total === 1 ? 'subtask' : 'subtasks'} ({nestedCounts.completed}/{nestedCounts.total})
+                            </span>
+                          )}
+                          {subtask.notes && (
+                            <span className="subtask-note-indicator">📝 Note</span>
+                          )}
+                          {getReferenceUrl(subtask.link || '') && (
+                            <span className="subtask-note-indicator">🔗 Link</span>
+                          )}
+                          <span className="subtask-note-indicator" style={{ color: '#2563eb' }}>
+                            Open subtask →
+                          </span>
+                        </div>
+                      </button>
+                      {getReferenceUrl(subtask.link || '') && (
+                        <a
+                          href={getReferenceUrl(subtask.link)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="task-link"
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          Open link
+                        </a>
+                      )}
+                      <button
+                        type="button"
+                        className="subtask-delete-btn"
+                        onClick={() => handleDeleteSubtask(subtask.id, subtask.title)}
+                        aria-label={`Delete subtask ${subtask.title}`}
+                      >
+                        ×
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             ) : (
-              <p className="subtasks-empty">No subtasks yet.</p>
+              <p className="subtasks-empty">No subtasks yet. Add one above!</p>
             )}
           </section>
-            </>
-          )}
         </section>
       </main>
     );
@@ -1354,7 +1551,7 @@ function App() {
                       className={`task-title-btn${task.completed ? ' completed' : ''}`}
                       onClick={() => {
                         setSelectedTaskId(task.id);
-                        setSelectedSubtaskIndex(null);
+                        setSubtaskPath([]);
                         setTaskReferenceDraft(task.link || '');
                         setTaskDateDraft({
                           startDate: task.startDate || '',
@@ -1389,6 +1586,15 @@ function App() {
                       {isTaskOverdue(task) && (
                         <span className="overdue-tag">🚨 Overdue</span>
                       )}
+
+                      {(() => {
+                        const counts = countSubtasksRecursive(task.subtasks || []);
+                        return counts.total > 0 ? (
+                          <span className="subtask-badge">
+                            📋 {counts.completed}/{counts.total} subtasks
+                          </span>
+                        ) : null;
+                      })()}
 
                       {getReferenceUrl(task.link || '') && (
                         <a
