@@ -858,9 +858,77 @@ body.dark-theme .subtask-title-btn {
 }
 
 body.dark-theme .category-chip {
-  background: #0f172a;
-  border-color: #334155;
-  color: #cbd5e1;
+  background: #334155 !important;
+  border-color: #475569 !important;
+  color: #f1f5f9 !important;
+}
+
+body.dark-theme .category-remove-btn {
+  background: #7f1d1d !important;
+  color: #fca5a5 !important;
+}
+
+body.dark-theme .category-remove-btn:hover:not(:disabled) {
+  background: #991b1b !important;
+}
+
+/* Category Label Badges (High Contrast in Dark Mode) */
+body.dark-theme .category-label {
+  background: #1e3a8a !important;
+  color: #93c5fd !important;
+  font-weight: 600;
+}
+
+/* Date and Deadlines in Dark Mode */
+body.dark-theme .date-label {
+  color: #cbd5e1 !important;
+}
+
+body.dark-theme .date-label.overdue {
+  color: #f87171 !important;
+}
+
+/* Placeholders in Dark Mode */
+body.dark-theme input::placeholder,
+body.dark-theme textarea::placeholder {
+  color: #94a3b8 !important;
+  opacity: 1 !important;
+}
+
+/* Select Dropdowns in Dark Mode */
+body.dark-theme select option {
+  background: #1e293b;
+  color: #f8fafc;
+}
+
+/* Dashboard Metric Numbers */
+body.dark-theme .card h2 {
+  color: #60a5fa !important;
+}
+
+/* Status Badges */
+body.dark-theme .detail-status {
+  background: #1e3a8a !important;
+  color: #93c5fd !important;
+}
+
+body.dark-theme .detail-status.completed {
+  background: #334155 !important;
+  color: #94a3b8 !important;
+}
+
+body.dark-theme .subtask-note-indicator,
+body.dark-theme .subtask-parent-label {
+  color: #94a3b8 !important;
+}
+
+body.dark-theme input[type="checkbox"] {
+  accent-color: #4f46e5;
+}
+
+body.dark-theme .subtask-delete-btn {
+  background: #7f1d1d !important;
+  color: #fca5a5 !important;
 }
 
 body.dark-theme .setting-toggle,
