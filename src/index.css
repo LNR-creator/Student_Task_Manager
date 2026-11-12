@@ -50,6 +50,87 @@
   padding: 4px;
 }
 
+.date-input-label {
+  display: flex;
+  flex: 1;
+  min-width: 145px;
+  flex-direction: column;
+  gap: 5px;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.date-input-label input {
+  width: 100%;
+}
+
+.notification-button {
+  grid-column: 1 / -1;
+  justify-self: end;
+  min-height: 40px;
+  padding: 8px 14px;
+  border: 1px solid #bfdbfe;
+  border-radius: 7px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.notification-status,
+.reminder-help {
+  margin-top: 8px;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.task-date-form {
+  display: flex;
+  align-items: end;
+  gap: 12px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.task-date-form label {
+  display: flex;
+  flex: 1;
+  min-width: 150px;
+  flex-direction: column;
+  gap: 6px;
+  color: #475569;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.task-date-form input,
+.reference-form input {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid #ddd;
+  border-radius: 7px;
+  background: white;
+  color: #333;
+  font: inherit;
+}
+
+.reference-form {
+  margin-bottom: 18px;
+}
+
+.reference-form > div {
+  display: flex;
+  gap: 10px;
+}
+
+.detail-reference-link {
+  display: inline-block;
+  margin: -8px 0 18px;
+}
+
 @media (max-width: 600px) {
   .add-task {
     flex-direction: column;
@@ -57,6 +138,10 @@
 
   .add-task input,
   .add-task select {
+    width: 100%;
+  }
+
+  .date-input-label {
     width: 100%;
   }
 }
@@ -381,6 +466,25 @@
     width: 100%;
     min-height: 48px;
     font-size: 16px;
+  }
+
+  .task-date-form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .task-date-form label,
+  .task-date-form button {
+    width: 100%;
+  }
+
+  .reference-form > div {
+    flex-direction: column;
+  }
+
+  .reference-form input,
+  .reference-form button {
+    width: 100%;
   }
 
   .subtask-item {

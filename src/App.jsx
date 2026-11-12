@@ -3,6 +3,54 @@ import { useState, useEffect } from 'react';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import './App.css';
 
+function getReferenceUrl(value) {
+  const trimmedValue = value.trim();
+  if (!trimmedValue) return '';
+
+  try {
+    const url = new URL(trimmedValue);
+    return url.protocol === 'http:' || url.protocol === 'https:'
+      ? url.href
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function getReminderId(taskId, reminderType) {
+  const value = `${taskId}-${reminderType}`;
+  let hash = 0;
+  for (const character of value) {
+    hash = (hash * 31 + character.charCodeAt(0)) | 0;
+  }
+  return Math.abs(hash % 2147483647) || 1;
+}
+
+function getTaskReminders(tasks) {
+  const now = Date.now();
+  return tasks.flatMap((task) => {
+    if (task.completed) return [];
+
+    return [
+      task.startDate && {
+        id: getReminderId(task.id, 'start'),
+        title: 'Task starts today',
+        body: task.title,
+        schedule: { at: new Date(`${task.startDate}T09:00:00`) }
+      },
+      task.dueDate && {
+        id: getReminderId(task.id, 'deadline'),
+        title: 'Task deadline today',
+        body: task.title,
+        schedule: { at: new Date(`${task.dueDate}T09:00:00`) }
+      }
+    ].filter((reminder) => (
+      reminder && !Number.isNaN(reminder.schedule.at.getTime()) &&
+      reminder.schedule.at.getTime() > now
+    ));
+  });
+}
+
 const DEFAULT_CATEGORIES = [
   'Study',
   'Assignment',
@@ -16,36 +64,6 @@ const DEFAULT_CATEGORIES = [
 ];
 
 function App() {
-  async function testNotification() {
-  try {
-    const permission =
-      await LocalNotifications.requestPermissions();
-
-    if (permission.display !== 'granted') {
-      alert('Notification permission not granted.');
-      return;
-    }
-
-    await LocalNotifications.schedule({
-      notifications: [
-        {
-          id: 999,
-          title: 'Student Task Manager 📚',
-          body: 'Your notification system is working!',
-          schedule: {
-            at: new Date(Date.now() + 10000)
-          }
-        }
-      ]
-    });
-
-    alert('Test notification scheduled! Check your phone in 10 seconds.');
-  } catch (error) {
-    console.error('Notification error:', error);
-    alert('Unable to schedule notification.');
-  }
-}
-
   // Search and filter states
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
@@ -88,10 +106,17 @@ function App() {
   });
   const [categoryInput, setCategoryInput] = useState('');
   const [category, setCategory] = useState('Study');
+  const [startDate, setStartDate] = useState('');
   const [dueDate, setDueDate] = useState('');
   const [selectedTaskId, setSelectedTaskId] = useState(null);
   const [selectedSubtaskIndex, setSelectedSubtaskIndex] = useState(null);
   const [subtaskInput, setSubtaskInput] = useState('');
+  const [subtaskReferenceInput, setSubtaskReferenceInput] = useState('');
+  const [taskReferenceDraft, setTaskReferenceDraft] = useState('');
+  const [subtaskReferenceDraft, setSubtaskReferenceDraft] = useState('');
+  const [taskDateDraft, setTaskDateDraft] = useState({ startDate: '', dueDate: '' });
+  const [notificationStatus, setNotificationStatus] = useState('');
+  const [reminderSyncVersion, setReminderSyncVersion] = useState(0);
 
   // Save tasks to LocalStorage
   useEffect(() => {
@@ -104,6 +129,88 @@ function App() {
   useEffect(() => {
     localStorage.setItem('studentTaskCategories', JSON.stringify(categories));
   }, [categories]);
+
+  const reminderTaskData = JSON.stringify(tasks.map((task) => ({
+    id: task.id,
+    title: task.title,
+    startDate: task.startDate || '',
+    dueDate: task.dueDate || '',
+    completed: task.completed
+  })));
+
+  useEffect(() => {
+    async function synchronizeReminders() {
+      try {
+        const scheduledIds = JSON.parse(
+          localStorage.getItem('studentTaskReminderIds') || '[]'
+        );
+        if (!Array.isArray(scheduledIds)) {
+          throw new Error('Saved reminder IDs are invalid.');
+        }
+
+        const notifications = getTaskReminders(JSON.parse(reminderTaskData));
+        if (scheduledIds.length > 0) {
+          await LocalNotifications.cancel({
+            notifications: scheduledIds.map((id) => ({ id }))
+          });
+        }
+
+        if (notifications.length === 0) {
+          localStorage.removeItem('studentTaskReminderIds');
+          setNotificationStatus('');
+          return;
+        }
+
+        const permission = await LocalNotifications.checkPermissions();
+        if (permission.display !== 'granted') {
+          localStorage.removeItem('studentTaskReminderIds');
+          setNotificationStatus('Enable notifications to receive your task reminders.');
+          return;
+        }
+
+        await LocalNotifications.schedule({ notifications });
+        localStorage.setItem(
+          'studentTaskReminderIds',
+          JSON.stringify(notifications.map(({ id }) => id))
+        );
+        setNotificationStatus(
+          'Reminders are scheduled for 9:00 AM on upcoming start dates and deadlines.'
+        );
+      } catch (error) {
+        console.error('Unable to synchronize task reminders:', error);
+        setNotificationStatus(
+          `Unable to schedule task reminders: ${error instanceof Error ? error.message : 'Unknown error'}`
+        );
+      }
+    }
+
+    synchronizeReminders();
+  }, [reminderTaskData, reminderSyncVersion]);
+
+  async function requestNotificationPermission() {
+    try {
+      const currentPermission = await LocalNotifications.checkPermissions();
+      if (currentPermission.display === 'granted') {
+        setReminderSyncVersion((version) => version + 1);
+        return true;
+      }
+
+      const permission = await LocalNotifications.requestPermissions();
+      if (permission.display === 'granted') {
+        setReminderSyncVersion((version) => version + 1);
+        return true;
+      }
+
+      setNotificationStatus('Notifications are disabled. The task was saved without reminders.');
+      return false;
+    } catch (error) {
+      console.error('Unable to request notification permission:', error);
+      setNotificationStatus(
+        `Notifications are unavailable: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
+      return false;
+    }
+  }
 
   function handleAddCategory(event) {
     event.preventDefault();
@@ -148,7 +255,7 @@ function App() {
   }
 
   // Add task
-  function handleAddTask() {
+  async function handleAddTask() {
 
     if (taskInput.trim() === '') {
       alert('Please enter a task!');
@@ -160,11 +267,27 @@ function App() {
       return;
     }
 
+    const link = getReferenceUrl(taskLink);
+    if (link === null) {
+      alert('Enter a valid http or https reference link.');
+      return;
+    }
+
+    if (startDate && dueDate && dueDate < startDate) {
+      alert('The deadline cannot be before the start date.');
+      return;
+    }
+
+    if (getTaskReminders([{ id: Date.now(), title: taskInput.trim(), startDate, dueDate }]).length > 0) {
+      await requestNotificationPermission();
+    }
+
     const newTask = {
       id: Date.now(),
       title: taskInput.trim(),
-      link: taskLink.trim(),
+      link,
       category: category,
+      startDate,
       dueDate: dueDate,
       completed: false,
       notes: '',
@@ -175,6 +298,7 @@ function App() {
 
     setTaskInput('');
     setCategory('Study');
+    setStartDate('');
     setDueDate('');
     setTaskLink('');
   }
@@ -217,18 +341,63 @@ function App() {
     )));
   }
 
+  async function handleSaveTaskDates(event) {
+    event.preventDefault();
+    if (!selectedTask) return;
+
+    const { startDate: nextStartDate, dueDate: nextDueDate } = taskDateDraft;
+    if (nextStartDate && nextDueDate && nextDueDate < nextStartDate) {
+      alert('The deadline cannot be before the start date.');
+      return;
+    }
+
+    if (getTaskReminders([{
+      ...selectedTask,
+      startDate: nextStartDate,
+      dueDate: nextDueDate
+    }]).length > 0) {
+      await requestNotificationPermission();
+    }
+
+    updateTask(selectedTask.id, {
+      startDate: nextStartDate,
+      dueDate: nextDueDate
+    });
+  }
+
+  function handleSaveTaskReference(event) {
+    event.preventDefault();
+    if (!selectedTask) return;
+
+    const link = getReferenceUrl(taskReferenceDraft);
+    if (link === null) {
+      alert('Enter a valid http or https reference link.');
+      return;
+    }
+
+    updateTask(selectedTask.id, { link });
+    setTaskReferenceDraft(link);
+  }
+
   function handleAddSubtask(event) {
     event.preventDefault();
     const title = subtaskInput.trim();
     if (!title || !selectedTask) return;
 
+    const link = getReferenceUrl(subtaskReferenceInput);
+    if (link === null) {
+      alert('Enter a valid http or https reference link.');
+      return;
+    }
+
     updateTask(selectedTask.id, {
       subtasks: [
         ...(selectedTask.subtasks || []),
-        { title, completed: false }
+        { title, link, completed: false }
       ]
     });
     setSubtaskInput('');
+    setSubtaskReferenceInput('');
   }
 
   function handleToggleSubtask(subtaskIndex) {
@@ -271,6 +440,24 @@ function App() {
         index === subtaskIndex ? { ...subtask, notes } : subtask
       ))
     });
+  }
+
+  function handleSaveSubtaskReference(event) {
+    event.preventDefault();
+    if (!selectedTask || selectedSubtaskIndex === null) return;
+
+    const link = getReferenceUrl(subtaskReferenceDraft);
+    if (link === null) {
+      alert('Enter a valid http or https reference link.');
+      return;
+    }
+
+    updateTask(selectedTask.id, {
+      subtasks: (selectedTask.subtasks || []).map((subtask, index) => (
+        index === selectedSubtaskIndex ? { ...subtask, link } : subtask
+      ))
+    });
+    setSubtaskReferenceDraft(link);
   }
 
   // Export tasks to JSON
@@ -326,8 +513,10 @@ function App() {
           task.title.trim() !== '' &&
           typeof task.category === 'string' &&
           typeof task.completed === 'boolean' &&
+          (task.startDate === undefined || typeof task.startDate === 'string') &&
           (task.dueDate === undefined || typeof task.dueDate === 'string') &&
-          (task.link === undefined || typeof task.link === 'string')
+          (task.link === undefined || typeof task.link === 'string') &&
+          (task.subtasks === undefined || Array.isArray(task.subtasks))
         );
 
         if (!validTasks) {
@@ -351,8 +540,9 @@ function App() {
             id: task.id,
             title: task.title.trim(),
             category: task.category,
+            startDate: task.startDate || '',
             dueDate: task.dueDate || '',
-            link: task.link || '',
+            link: getReferenceUrl(task.link || '') || '',
             completed: task.completed,
             notes: typeof task.notes === 'string' ? task.notes : '',
             subtasks: Array.isArray(task.subtasks)
@@ -363,7 +553,10 @@ function App() {
               ).map((subtask) => ({
                 title: subtask.title,
                 completed: subtask.completed,
-                notes: typeof subtask.notes === 'string' ? subtask.notes : ''
+                notes: typeof subtask.notes === 'string' ? subtask.notes : '',
+                link: typeof subtask.link === 'string'
+                  ? getReferenceUrl(subtask.link) || ''
+                  : ''
               }))
               : []
           })));
@@ -463,6 +656,30 @@ function App() {
                 </span>
               </header>
 
+              <form className="reference-form" onSubmit={handleSaveSubtaskReference}>
+                <label className="detail-label" htmlFor="subtask-reference">Reference link</label>
+                <div>
+                  <input
+                    id="subtask-reference"
+                    type="url"
+                    placeholder="https://example.com"
+                    value={subtaskReferenceDraft}
+                    onChange={(event) => setSubtaskReferenceDraft(event.target.value)}
+                  />
+                  <button type="submit" className="category-add-btn">Save link</button>
+                </div>
+              </form>
+              {getReferenceUrl(selectedSubtask.link || '') && (
+                <a
+                  href={getReferenceUrl(selectedSubtask.link)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="task-link detail-reference-link"
+                >
+                  🔗 Open subtask reference
+                </a>
+              )}
+
               <label className="detail-label" htmlFor="subtask-notes">Notes</label>
               <textarea
                 id="subtask-notes"
@@ -492,8 +709,11 @@ function App() {
               <h1>{selectedTask.title}</h1>
               <div className="task-meta">
                 <span className="category-label">{selectedTask.category}</span>
+                {selectedTask.startDate && (
+                  <span className="date-label">Starts: {selectedTask.startDate}</span>
+                )}
                 {selectedTask.dueDate && (
-                  <span className="date-label">Due: {selectedTask.dueDate}</span>
+                  <span className="date-label">Deadline: {selectedTask.dueDate}</span>
                 )}
               </div>
             </div>
@@ -501,6 +721,61 @@ function App() {
               {selectedTask.completed ? 'Completed' : 'In progress'}
             </span>
           </header>
+
+          {notificationStatus && (
+            <p className="notification-status" role="status">{notificationStatus}</p>
+          )}
+
+          <form className="task-date-form" onSubmit={handleSaveTaskDates}>
+            <label>
+              Start date
+              <input
+                type="date"
+                value={taskDateDraft.startDate}
+                onChange={(event) => setTaskDateDraft((dates) => ({
+                  ...dates,
+                  startDate: event.target.value
+                }))}
+              />
+            </label>
+            <label>
+              Deadline
+              <input
+                type="date"
+                min={taskDateDraft.startDate || undefined}
+                value={taskDateDraft.dueDate}
+                onChange={(event) => setTaskDateDraft((dates) => ({
+                  ...dates,
+                  dueDate: event.target.value
+                }))}
+              />
+            </label>
+            <button type="submit" className="category-add-btn">Save dates &amp; reminders</button>
+          </form>
+
+          <form className="reference-form" onSubmit={handleSaveTaskReference}>
+            <label className="detail-label" htmlFor="task-reference">Reference link</label>
+            <div>
+              <input
+                id="task-reference"
+                type="url"
+                placeholder="https://example.com"
+                value={taskReferenceDraft}
+                onChange={(event) => setTaskReferenceDraft(event.target.value)}
+              />
+              <button type="submit" className="category-add-btn">Save link</button>
+            </div>
+          </form>
+          {getReferenceUrl(selectedTask.link || '') && (
+            <a
+              href={getReferenceUrl(selectedTask.link)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="task-link detail-reference-link"
+            >
+              🔗 Open task reference
+            </a>
+          )}
 
           <label className="detail-label" htmlFor="task-notes">Notes</label>
           <textarea
@@ -528,6 +803,13 @@ function App() {
                 value={subtaskInput}
                 onChange={(event) => setSubtaskInput(event.target.value)}
               />
+              <input
+                type="url"
+                aria-label="Subtask reference link"
+                placeholder="Reference link (optional)"
+                value={subtaskReferenceInput}
+                onChange={(event) => setSubtaskReferenceInput(event.target.value)}
+              />
               <button type="submit" className="category-add-btn">Add subtask</button>
             </form>
 
@@ -545,7 +827,10 @@ function App() {
                     <button
                       type="button"
                       className={`subtask-title-btn${subtask.completed ? ' subtask-completed' : ''}`}
-                      onClick={() => setSelectedSubtaskIndex(index)}
+                      onClick={() => {
+                        setSelectedSubtaskIndex(index);
+                        setSubtaskReferenceDraft(subtask.link || '');
+                      }}
                     >
                       <span>
                         {subtask.title}
@@ -553,7 +838,21 @@ function App() {
                       <span className="subtask-note-indicator">
                         {subtask.notes ? 'View / edit note' : 'Add note'}
                       </span>
+                      {getReferenceUrl(subtask.link || '') && (
+                        <span className="subtask-note-indicator">Reference link added</span>
+                      )}
                     </button>
+                    {getReferenceUrl(subtask.link || '') && (
+                      <a
+                        href={getReferenceUrl(subtask.link)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="task-link"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        Open link
+                      </a>
+                    )}
                     <button
                       type="button"
                       className="subtask-delete-btn"
@@ -586,6 +885,9 @@ function App() {
           <div>
             <h1>Student Tasks 📚</h1>
             <p>Plan your day. Achieve your goals.</p>
+            {notificationStatus && (
+              <p className="notification-status" role="status">{notificationStatus}</p>
+            )}
           </div>
 
           <div className="header-icon">
@@ -596,9 +898,13 @@ function App() {
 
       {/* Dashboard */}
       <section className="dashboard">
-        <button type="button" onClick={testNotification}>
-  🔔 Test Notification
-</button>
+        <button
+          type="button"
+          className="notification-button"
+          onClick={requestNotificationPermission}
+        >
+          🔔 Enable notifications
+        </button>
 
         <div className="card">
           <h3>Total Tasks</h3>
@@ -663,6 +969,7 @@ function App() {
           <input
             type="url"
             placeholder="Reference link (optional)"
+            aria-label="Task reference link"
             value={taskLink}
             onChange={(e) => setTaskLink(e.target.value)}
           />
@@ -676,17 +983,36 @@ function App() {
             ))}
           </select>
 
-          <input
+          <label className="date-input-label">
+            Start date
+            <input
+              type="date"
+              aria-label="Task start date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+            />
+          </label>
+
+          <label className="date-input-label">
+            Deadline
+            <input
             type="date"
+            aria-label="Task deadline"
+            min={startDate || undefined}
             value={dueDate}
             onChange={(e) => setDueDate(e.target.value)}
           />
+          </label>
 
           <button onClick={handleAddTask}>
             Add Task
           </button>
 
         </div>
+        <p className="reminder-help">
+          Reminders are sent at 9:00 AM local time on upcoming start dates and deadlines.
+          On the web, keep this page open to receive them.
+        </p>
 
         <section className="category-manager" aria-labelledby="category-manager-title">
           <div className="category-manager-heading">
@@ -800,7 +1126,15 @@ function App() {
                     <button
                       type="button"
                       className={`task-title-btn${task.completed ? ' completed' : ''}`}
-                      onClick={() => setSelectedTaskId(task.id)}
+                      onClick={() => {
+                        setSelectedTaskId(task.id);
+                        setSelectedSubtaskIndex(null);
+                        setTaskReferenceDraft(task.link || '');
+                        setTaskDateDraft({
+                          startDate: task.startDate || '',
+                          dueDate: task.dueDate || ''
+                        });
+                      }}
                     >
                       {task.title}
                     </button>
@@ -812,15 +1146,21 @@ function App() {
                         {task.category}
                       </span>
 
-                      {task.dueDate && (
+                      {task.startDate && (
                         <span className="date-label">
-                          Due: {task.dueDate}
+                          Starts: {task.startDate}
                         </span>
                       )}
 
-                      {task.link && (
+                      {task.dueDate && (
+                        <span className="date-label">
+                          Deadline: {task.dueDate}
+                        </span>
+                      )}
+
+                      {getReferenceUrl(task.link || '') && (
                         <a
-                          href={task.link}
+                          href={getReferenceUrl(task.link)}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="task-link"
