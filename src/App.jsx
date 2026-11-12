@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
+import { setupNotificationChannel, scheduleTestNotification } from './services/notificationService';
 import './App.css';
 
 const DEFAULT_REMINDER_TIME = '09:00';
@@ -92,6 +93,7 @@ function App() {
   });
 
   const [taskInput, setTaskInput] = useState('');
+  const [taskNotesInput, setTaskNotesInput] = useState('');
   const [categories, setCategories] = useState(() => {
     const savedCategories = localStorage.getItem('studentTaskCategories');
     let storedCategories = [];
@@ -150,6 +152,10 @@ function App() {
   useEffect(() => {
     localStorage.setItem('studentTaskCategories', JSON.stringify(categories));
   }, [categories]);
+
+  useEffect(() => {
+    setupNotificationChannel();
+  }, []);
 
   const reminderTaskData = JSON.stringify(tasks.map((task) => ({
     id: task.id,
@@ -310,6 +316,17 @@ function App() {
     }
   }
 
+  async function handleTestNotification() {
+    try {
+      setNotificationStatus('Scheduling 10-second test notification...');
+      const triggerTime = await scheduleTestNotification(10);
+      const timeStr = triggerTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      setNotificationStatus(`⏳ Test alert scheduled for ${timeStr}! You can minimize or close the app now to test.`);
+    } catch (error) {
+      setNotificationStatus(`❌ ${error instanceof Error ? error.message : 'Failed to schedule test notification.'}`);
+    }
+  }
+
   function handleAddCategory(event) {
     event.preventDefault();
     const newCategory = categoryInput.trim();
@@ -398,14 +415,16 @@ function App() {
       startTime,
       dueDate: dueDate,
       endTime,
+      dueTime: endTime,
       completed: false,
-      notes: '',
+      notes: taskNotesInput.trim(),
       subtasks: []
     };
 
     setTasks((currentTasks) => [...currentTasks, newTask]);
 
     setTaskInput('');
+    setTaskNotesInput('');
     setCategory('Study');
     setStartDate('');
     setStartTime(DEFAULT_REMINDER_TIME);
@@ -483,7 +502,8 @@ function App() {
       startDate: nextStartDate,
       startTime: nextStartTime,
       dueDate: nextDueDate,
-      endTime: nextEndTime
+      endTime: nextEndTime,
+      dueTime: nextEndTime
     });
   }
 
@@ -1048,8 +1068,8 @@ function App() {
         </div>
       </header>
 
-      {/* Dashboard */}
-      <section className="dashboard">
+      {/* Notification Controls */}
+      <div className="notification-controls">
         <button
           type="button"
           className="notification-button"
@@ -1057,7 +1077,17 @@ function App() {
         >
           🔔 Enable notifications
         </button>
+        <button
+          type="button"
+          className="notification-test-btn"
+          onClick={handleTestNotification}
+        >
+          ⚡ Test 10s Notification
+        </button>
+      </div>
 
+      {/* Dashboard */}
+      <section className="dashboard">
         <div className="card">
           <h3>Total Tasks</h3>
           <h2>{totalTasks}</h2>

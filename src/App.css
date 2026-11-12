@@ -458,3 +458,53 @@ body {
     width: 100%;
   }
 }
+
+/* Notification Controls & Banners */
+.notification-controls {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.notification-button,
+.notification-test-btn {
+  padding: 11px 18px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease, transform 0.1s ease;
+  min-height: 44px;
+}
+
+.notification-button {
+  background: #4f46e5;
+  color: white;
+}
+
+.notification-button:hover {
+  background: #4338ca;
+}
+
+.notification-test-btn {
+  background: #0ea5e9;
+  color: white;
+}
+
+.notification-test-btn:hover {
+  background: #0284c7;
+}
+
+.notification-status {
+  background: #eef2ff;
+  border-left: 4px solid #4f46e5;
+  color: #3730a3;
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  margin-top: 12px;
+  line-height: 1.4;
+}
+

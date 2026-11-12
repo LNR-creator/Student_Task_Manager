@@ -1,5 +1,10 @@
 {
   "appId": "com.student.taskmanager",
   "appName": "Student Task Manager",
-  "webDir": "dist"
+  "webDir": "dist",
+  "plugins": {
+    "LocalNotifications": {
+      "iconColor": "#4f46e5"
+    }
+  }
 }
